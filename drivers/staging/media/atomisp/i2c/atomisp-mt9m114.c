@@ -1534,16 +1534,16 @@ static int mt9m114_probe(struct i2c_client *client)
 	int ret = 0;
 	unsigned int i;
 	void *pdata;
-
+	
 	/* Setup sensor configuration structure */
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (!dev)
 		return -ENOMEM;
-
+	
 	v4l2_i2c_subdev_init(&dev->sd, client, &mt9m114_ops);
 	pdata = gmin_camera_platform_data(&dev->sd,
-					  ATOMISP_INPUT_FORMAT_RAW_10,
-					  atomisp_bayer_order_grbg);
+				      ATOMISP_INPUT_FORMAT_RAW_10,
+				      atomisp_bayer_order_grbg);
 	if (pdata)
 		ret = mt9m114_s_config(&dev->sd, client->irq, pdata);
 	if (!pdata || ret) {
@@ -1551,7 +1551,21 @@ static int mt9m114_probe(struct i2c_client *client)
 		kfree(dev);
 		return ret;
 	}
-
+	
+	/* Check and handle clock based on ACPI */
+	if (!acpi_dev_present("INT33F0", NULL, -1)) {
+		/*
+		 * If ACPI device INT33F0 is not present, handle the clock normally.
+		 * If the clock is managed by ACPI, this section can be skipped.
+		 */
+		dev->clk = devm_clk_get(&client->dev, NULL);
+		if (IS_ERR(dev->clk)) {
+		    dev_err(&client->dev, "Failed to get clock\n");
+		    ret = PTR_ERR(dev->clk);
+		    goto err_clk;
+		}
+	}
+	
 	ret = atomisp_register_i2c_module(&dev->sd, pdata);
 	if (ret) {
 		v4l2_device_unregister_subdev(&dev->sd);
@@ -1559,7 +1573,7 @@ static int mt9m114_probe(struct i2c_client *client)
 		/* Coverity CID 298095 - return on error */
 		return ret;
 	}
-
+	
 	/* TODO add format code here */
 	dev->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	dev->pad.flags = MEDIA_PAD_FL_SOURCE;
@@ -1594,6 +1608,10 @@ static int mt9m114_probe(struct i2c_client *client)
 		return ret;
 	}
 	return 0;
+err_clk:
+	/* Handle clock error */
+	/* Cleanup code... */
+	return ret;
 }
 
 static const struct acpi_device_id mt9m114_acpi_match[] = {

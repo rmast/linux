@@ -2304,7 +2304,15 @@ static int mt9m114_parse_dt(struct mt9m114 *sensor)
 	struct fwnode_handle *ep;
 	int ret;
 
-	ep = fwnode_graph_get_next_endpoint(fwnode, NULL);
+	unsigned int retries = 10;
+	
+        while (retries--) {
+	    ep = fwnode_graph_get_next_endpoint(fwnode, NULL);
+	    if (ep)
+	        break;
+
+	    msleep(20); // Wait 20ms before retrying
+        }
 	if (!ep) {
 		dev_err(&sensor->client->dev, "No endpoint found\n");
 		return -EINVAL;

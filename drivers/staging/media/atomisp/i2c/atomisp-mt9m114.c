@@ -1533,7 +1533,23 @@ static int mt9m114_probe(struct i2c_client *client)
 	struct mt9m114_device *dev;
 	int ret = 0;
 	unsigned int i;
+	unsigned int retries = 10;
+	struct fwnode_handle *fwnode;
+	struct fwnode_handle *endpoint;
+    
 	void *pdata;
+
+	fwnode = dev_fwnode(&client->dev);
+	while (retries--) {
+		endpoint = fwnode_graph_get_next_endpoint(fwnode, NULL);
+		if (endpoint) {
+			fwnode_handle_put(endpoint);
+			break;
+		}
+		msleep(20); // Wait 20ms before retrying
+	}
+	if (!endpoint)
+		return -ENODEV;
 
 	/* Setup sensor configuration structure */
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);

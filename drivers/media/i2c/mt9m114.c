@@ -2360,7 +2360,19 @@ static int mt9m114_probe(struct i2c_client *client)
 		return ret;
 
 	/* Acquire clocks, GPIOs and regulators. */
-	sensor->clk = devm_clk_get(dev, NULL);
+	/* Check and handle clock based on ACPI */
+	if (!acpi_dev_present("INT33F0", NULL, -1)) {
+		/*
+		 * If ACPI device INT33F0 is not present, handle the clock normally.
+		 * If the clock is managed by ACPI, this section can be skipped.
+		 */
+		dev->clk = devm_clk_get(&client->dev, NULL);
+		if (IS_ERR(dev->clk)) {
+		    dev_err(&client->dev, "Failed to get clock\n");
+		    ret = PTR_ERR(dev->clk);
+		    goto err_clk;
+		}
+	}
 	if (IS_ERR(sensor->clk)) {
 		ret = PTR_ERR(sensor->clk);
 		dev_err_probe(dev, ret, "Failed to get clock\n");

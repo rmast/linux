@@ -17,6 +17,7 @@
 #include <linux/hugetlb.h>
 #include <linux/highmem.h>
 #include <linux/slab.h>		/* for kmalloc */
+#include <linux/vmalloc.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/string.h>
@@ -51,6 +52,7 @@ static int __bo_init(struct hmm_bo_device *bdev, struct hmm_buffer_object *bo,
 
 	bo->bdev = bdev;
 	bo->vmap_addr = NULL;
+	bo->vmalloc_addr = NULL;
 	bo->status = HMM_BO_FREE;
 	bo->start = bdev->start;
 	bo->pgnr = pgnr;
@@ -452,13 +454,13 @@ void hmm_bo_release(struct hmm_buffer_object *bo)
 		hmm_bo_unbind(bo);
 	}
 
-	if (bo->status & HMM_BO_PAGE_ALLOCED) {
-		dev_warn(atomisp_dev, "the pages is not freed, free pages first\n");
-		hmm_bo_free_pages(bo);
-	}
 	if (bo->status & HMM_BO_VMAPED || bo->status & HMM_BO_VMAPED_CACHED) {
 		dev_warn(atomisp_dev, "the vunmap is not done, do it...\n");
 		hmm_bo_vunmap(bo);
+	}
+	if (bo->status & HMM_BO_PAGE_ALLOCED) {
+		dev_warn(atomisp_dev, "the pages is not freed, free pages first\n");
+		hmm_bo_free_pages(bo);
 	}
 
 	rb_erase(&bo->node, &bdev->allocated_rbtree);
@@ -670,12 +672,17 @@ int hmm_bo_alloc_pages(struct hmm_buffer_object *bo,
 		       void *vmalloc_addr)
 {
 	int ret = -EINVAL;
+	void *fallback = NULL;
+	size_t bytes;
+
 
 	check_bo_null_return(bo, -EINVAL);
 
 	mutex_lock(&bo->mutex);
 	check_bo_status_no_goto(bo, HMM_BO_PAGE_ALLOCED, status_err);
 
+	bo->vmalloc_addr = NULL;
+	
 	bo->pages = kcalloc(bo->pgnr, sizeof(struct page *), GFP_KERNEL);
 	if (unlikely(!bo->pages)) {
 		ret = -ENOMEM;
@@ -684,8 +691,38 @@ int hmm_bo_alloc_pages(struct hmm_buffer_object *bo,
 
 	if (type == HMM_BO_PRIVATE) {
 		ret = alloc_private_pages(bo);
+		if (ret == -ENOMEM) {
+			/*
+			 * alloc_pages_bulk() may fail under memory pressure /
+			 * fragmentation (e.g. low-RAM BYT systems). Fall back
+			 * to vmalloc-backed pages so CSS init / power-on can
+			 * still succeed.
+			 */
+			bytes = (size_t)bo->pgnr * PAGE_SIZE;
+			fallback = vmalloc(bytes);
+			if (!fallback) {
+				ret = -ENOMEM;
+				goto alloc_err;
+			}
+
+			ret = alloc_vmalloc_pages(bo, fallback);
+			if (ret) {
+				vfree(fallback);
+				fallback = NULL;
+				goto alloc_err;
+			}
+
+			bo->vmalloc_addr = fallback;
+			type = HMM_BO_VMALLOC;
+			ret = 0;
+		}
 	} else if (type == HMM_BO_VMALLOC) {
 		ret = alloc_vmalloc_pages(bo, vmalloc_addr);
+		/*
+		 * Do not take ownership of vmalloc_addr. It may be owned by the
+		 * caller or not be a vmalloc allocation at all.
+		 * bo->vmalloc_addr is reserved for HMM-owned fallback allocations.
+		 */
 	} else {
 		dev_err(atomisp_dev, "invalid buffer type.\n");
 		ret = -EINVAL;
@@ -702,7 +739,11 @@ int hmm_bo_alloc_pages(struct hmm_buffer_object *bo,
 	return 0;
 
 alloc_err:
+	/* On failure, free any fallback vmalloc backing store. */
+	if (fallback)
+		vfree(fallback);
 	kfree(bo->pages);
+	bo->pages = NULL;
 	mutex_unlock(&bo->mutex);
 	dev_err(atomisp_dev, "alloc pages err...\n");
 	return ret;
@@ -729,12 +770,21 @@ void hmm_bo_free_pages(struct hmm_buffer_object *bo)
 
 	if (bo->type == HMM_BO_PRIVATE)
 		free_private_bo_pages(bo);
-	else if (bo->type == HMM_BO_VMALLOC)
-		; /* No-op, nothing to do */
+	else if (bo->type == HMM_BO_VMALLOC) {
+		/*
+		 * Backing store was allocated via vmalloc by HMM.
+		 * Free it when releasing the BO pages.
+		 */
+		if (bo->vmalloc_addr) {
+			vfree(bo->vmalloc_addr);
+			bo->vmalloc_addr = NULL;
+		}
+	}
 	else
 		dev_err(atomisp_dev, "invalid buffer type.\n");
 
 	kfree(bo->pages);
+	bo->pages = NULL;
 	mutex_unlock(&bo->mutex);
 
 	return;

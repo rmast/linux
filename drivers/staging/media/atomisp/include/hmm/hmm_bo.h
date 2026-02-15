@@ -112,6 +112,9 @@ struct hmm_buffer_object {
 	int		status;
 	void		*vmap_addr; /* kernel virtual address by vmap */
 
+	/* Base pointer for HMM_BO_VMALLOC backing store (if used). */
+	void            *vmalloc_addr;
+
 	struct rb_node	node;
 	unsigned int	start;
 	unsigned int	end;

@@ -134,6 +134,18 @@ static int atomisp_q_one_metadata_buffer(struct atomisp_sub_device *asd,
 	return 0;
 }
 
+static unsigned int list_count(const struct list_head *head)
+{
+        const struct list_head *pos;
+        unsigned int n = 0;
+
+        list_for_each(pos, head)
+                n++;
+        return n;
+}
+
+#define ATOMISP_S3A_READY_MAX 2
+
 static int atomisp_q_one_s3a_buffer(struct atomisp_sub_device *asd,
 				    enum atomisp_input_stream_id stream_id,
 				    enum ia_css_pipe_id css_pipe_id)
@@ -142,8 +154,25 @@ static int atomisp_q_one_s3a_buffer(struct atomisp_sub_device *asd,
 	struct list_head *s3a_list;
 	unsigned int exp_id;
 
+	dev_dbg(asd->isp->dev, "s3a_bufs_in_css[%d]=%u\n", css_pipe_id, asd->s3a_bufs_in_css[css_pipe_id]);
 	if (asd->s3a_bufs_in_css[css_pipe_id] >= ATOMISP_CSS_Q_DEPTH)
 		return 0; /* we have reached CSS queue depth */
+
+        /*
+         * In typical webcam use-cases userspace never consumes 3A statistics.
+         * If we keep accumulating buffers in s3a_stats_ready, we eventually
+         * start recycling "ready" buffers and repeatedly dropping stats,
+         * which can destabilize AE/AWB and cause flicker.
+         *
+         * Keep only a small number of "ready" stats around, recycle the rest.
+         */
+        while (list_count(&asd->s3a_stats_ready) > ATOMISP_S3A_READY_MAX) {
+                struct atomisp_s3a_buf *old;
+                old = list_last_entry(&asd->s3a_stats_ready,
+                                      struct atomisp_s3a_buf, list);
+                list_del_init(&old->list);
+                list_add_tail(&old->list, &asd->s3a_stats);
+        }
 
 	if (!list_empty(&asd->s3a_stats)) {
 		s3a_list = &asd->s3a_stats;

@@ -78,11 +78,19 @@
 #define ATOMISP_ISP_MAX_TIMEOUT_COUNT	2
 #define ATOMISP_CSS_STOP_TIMEOUT_US	200000
 
-#define ATOMISP_CSS_Q_DEPTH	3
+/*
+ * CSS 3A statistics have multi-frame latency. A queue depth of 3 is too small
+ * and leads to dropped stats and visible flicker/underexposure (especially at VGA).
+ */
+#define ATOMISP_CSS_Q_DEPTH	8
 #define ATOMISP_CSS_EVENTS_MAX  16
 #define ATOMISP_CONT_RAW_FRAMES 15
 #define ATOMISP_METADATA_QUEUE_DEPTH_FOR_HAL	8
-#define ATOMISP_S3A_BUF_QUEUE_DEPTH_FOR_HAL	8
+/*
+ * Keep enough S3A buffers available so we can keep CSS fed without recycling
+ * ready buffers prematurely.
+ */
+#define ATOMISP_S3A_BUF_QUEUE_DEPTH_FOR_HAL	16
 
 /*
  * Define how fast CPU should be able to serve ISP interrupts.

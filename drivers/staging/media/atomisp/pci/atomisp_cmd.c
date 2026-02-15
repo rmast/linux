@@ -3563,6 +3563,8 @@ void atomisp_get_padding(struct atomisp_device *isp, u32 width, u32 height,
 	struct atomisp_input_subdev *input = &isp->inputs[isp->asd.input_curr];
 	struct v4l2_rect native_rect = input->native_rect;
 	const struct atomisp_in_fmt_conv *fc = NULL;
+	bool binned = false;
+	bool vga = false;
 	u32 min_pad_w = ISP2400_MIN_PAD_W;
 	u32 min_pad_h = ISP2400_MIN_PAD_H;
 	struct v4l2_mbus_framefmt *sink;
@@ -3575,13 +3577,27 @@ void atomisp_get_padding(struct atomisp_device *isp, u32 width, u32 height,
 
 	width = min(width, input->active_rect.width);
 	height = min(height, input->active_rect.height);
+	dev_dbg(isp->dev, "get_padding req=%ux%u active=%ux%u native=%ux%u\n",
+			width, height,
+			input->active_rect.width, input->active_rect.height,
+			input->native_rect.width, input->native_rect.height);
 
-	if (input->binning_support && width <= (input->active_rect.width / 2) &&
-				      height <= (input->active_rect.height / 2)) {
+	/*
+	 * For BYT/AtomISP the "binned/native/2" padding model can cause stream
+	 * start failures for VGA with some sensors/pipelines. Keep VGA on the
+	 * full native padding model so it can be selected by userspace (e.g.
+	 * Firefox/Teams) and still stream reliably.
+	 */
+	vga = (width == 640 && height == 480);
+
+	if (!vga &&
+	    input->binning_support &&
+	    width <= (input->active_rect.width / 2) &&
+	    height <= (input->active_rect.height / 2)) {
+		binned = true;
 		native_rect.width /= 2;
 		native_rect.height /= 2;
 	}
-
 	*padding_w = min_t(u32, (native_rect.width - width) & ~1, pad_w);
 	*padding_h = min_t(u32, (native_rect.height - height) & ~1, pad_h);
 
@@ -3597,6 +3613,18 @@ void atomisp_get_padding(struct atomisp_device *isp, u32 width, u32 height,
 		dev_warn(isp->dev, "%s: Could not get sensor format\n", __func__);
 		goto apply_min_padding;
 	}
+
+	/*
+	 * When using the "binned" (native/2) padding model, the available
+	 * margins can be extremely small (e.g. 648x488 for a 1296x976 sensor).
+	 * Enforcing the ISP2400 minimum padding (12x12, plus Bayer-order
+	 * adjustments) can make common small sizes like 640x480 impossible,
+	 * even though they would otherwise fit.
+	 *
+	 * Do not enforce the BYT minimum padding in this binned case.
+	 */
+	if (binned)
+		return;
 
 	/*
 	 * The ISP only supports GRBG for other bayer-orders additional padding

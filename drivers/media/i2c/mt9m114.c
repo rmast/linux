@@ -1768,20 +1768,31 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 	 * User-friendly alternative to exposing 25 individual weight controls.
 	 * Each preset applies a predefined pattern optimized for a use case.
 	 */
-	sensor->pa.ae_metering_preset =
-		v4l2_ctrl_new_std_menu_items(hdl, &mt9m114_pa_ctrl_ops,
-					     V4L2_CID_MT9M114_AE_METERING_PRESET,
-					     ARRAY_SIZE(mt9m114_metering_preset_names) - 2,
-					     0, MT9M114_METERING_PRESET_CENTER,
-					     mt9m114_metering_preset_names);
+	static const struct v4l2_ctrl_config ae_metering_preset_cfg = {
+		.ops = &mt9m114_pa_ctrl_ops,
+		.id = V4L2_CID_MT9M114_AE_METERING_PRESET,
+		.type = V4L2_CTRL_TYPE_MENU,
+		.name = "AE Metering Preset",
+		.min = 0,
+		.max = ARRAY_SIZE(mt9m114_metering_preset_names) - 2,
+		.def = MT9M114_METERING_PRESET_CENTER,
+		.qmenu = mt9m114_metering_preset_names,
+	};
+	sensor->pa.ae_metering_preset = v4l2_ctrl_new_custom(hdl, &ae_metering_preset_cfg, NULL);
 
 	/* Custom control: AE Tracking Speed (0x31AC register) */
-	sensor->pa.ae_track_speed =
-		v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops,
-				  V4L2_CID_MT9M114_AE_TRACK_SPEED,
-				  MT9M114_AE_TRACK_SPEED_NORMAL,
-				  0x07, 1,
-				  MT9M114_AE_TRACK_SPEED_NORMAL);
+	static const struct v4l2_ctrl_config ae_track_speed_cfg = {
+		.ops = &mt9m114_pa_ctrl_ops,
+		.id = V4L2_CID_MT9M114_AE_TRACK_SPEED,
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.name = "AE Track Speed",
+		.min = MT9M114_AE_TRACK_SPEED_NORMAL,
+		.max = 0x07,
+		.step = 1,
+		.def = MT9M114_AE_TRACK_SPEED_NORMAL,
+		.flags = V4L2_CTRL_FLAG_SLIDER,
+	};
+	sensor->pa.ae_track_speed = v4l2_ctrl_new_custom(hdl, &ae_track_speed_cfg, NULL);
 
 	if (sensor->pa.ae_track_speed)
 		sensor->pa.ae_track_speed->flags |= V4L2_CTRL_FLAG_SLIDER;

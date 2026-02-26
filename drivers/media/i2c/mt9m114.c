@@ -1346,13 +1346,31 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 	int ret = 0;
 	u64 mask;
 
+	/* V4L2 controls values are applied only when power is up. */
+	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
+		return 0;
+
 	/*
-	 * Handle custom controls first (before streaming check).
-	 * These can be set anytime and will take effect on next frame.
+	 * For exposure and VBLANK changes:
+	 * 1. Disable sensor's internal AE (if active)
+	 * 2. Use GROUP_HOLD to synchronize VTS and Exposure
 	 */
+	if (ctrl->id == V4L2_CID_EXPOSURE || ctrl->id == V4L2_CID_VBLANK ||
+	    ctrl->id == V4L2_CID_ANALOGUE_GAIN) {
+		/* Ensure manual AE mode before any exposure/gain/VTS changes */
+		ret = mt9m114_ensure_manual_ae(sensor);
+		if (ret) {
+			dev_err(&sensor->client->dev,
+				"Failed to ensure manual AE mode: %d\n", ret);
+			goto out;
+		}
+	}
+
+	/* Handle custom controls */
 	switch (ctrl->id) {
 	case V4L2_CID_MT9M114_AE_METERING_PRESET:
-		return mt9m114_apply_metering_preset(sensor, ctrl->val);
+		ret = mt9m114_apply_metering_preset(sensor, ctrl->val);
+		goto out;
 
 	case V4L2_CID_MT9M114_AE_TRACK_SPEED:
 		/*
@@ -1361,29 +1379,10 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 		 * Higher values = faster convergence in low light.
 		 * Range: 0x00 (normal) to 0x07 (very fast)
 		 */
-		return cci_write(sensor->regmap, MT9M114_AE_TRACK_SPEED,
-				 ctrl->val, &ret);
+		ret = cci_write(sensor->regmap, MT9M114_AE_TRACK_SPEED,
+				ctrl->val, &ret);
+		goto out;
 	}
-
-	/*
-	 * For exposure and VBLANK changes:
-	 * 1. Disable sensor's internal AE (if active)
-	 * 2. Use GROUP_HOLD to synchronize VTS and Exposure
-	 * 3. Write to both PA (0x30xx) and CAM (0xC8xx) registers
-	 */
-	if (ctrl->id == V4L2_CID_EXPOSURE || ctrl->id == V4L2_CID_VBLANK) {
-		/* Ensure manual AE mode before any exposure/VTS changes */
-		ret = mt9m114_ensure_manual_ae(sensor);
-		if (ret) {
-			dev_err(&sensor->client->dev,
-				"Failed to ensure manual AE mode: %d\n", ret);
-			return ret;
-		}
-	}
-
-	/* V4L2 controls values are applied only when power is up. */
-	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
-		return 0;
 
 	state = v4l2_subdev_get_locked_active_state(&sensor->pa.sd);
 	format = v4l2_subdev_state_get_format(state, 0);
@@ -1477,6 +1476,7 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	}
 
+out:
 	pm_runtime_put_autosuspend(&sensor->client->dev);
 
 	return ret;

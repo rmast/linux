@@ -879,6 +879,8 @@ void atomisp_buf_done(struct atomisp_sub_device *asd, int error,
 
 		if (!frame->valid)
 			error = true;
+		else
+			atomisp_update_frame_duration(asd);
 
 		pipe = vb_to_pipe(&frame->vb.vb2_buf);
 

@@ -4,6 +4,7 @@
 #include <linux/videodev2.h>
 #include <poll.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -75,6 +76,7 @@ int main(int argc, char **argv)
 	unsigned int i;
 	unsigned int frames = 0;
 	unsigned long long next_print;
+	bool reported_metadata = false;
 	int fd;
 
 	if (argc > 1)
@@ -208,6 +210,16 @@ int main(int argc, char **argv)
 		frames++;
 		if (now_ms() >= next_print) {
 			if (xioctl(fd, ATOMISP_IOC_G_ISP_PARM, &params) == 0) {
+				if (!reported_metadata) {
+					reported_metadata = true;
+					printf("metadata_height=%u metadata_stride=%u\n",
+					       params.metadata_config.metadata_height,
+					       params.metadata_config.metadata_stride);
+					if (!params.metadata_config.metadata_height ||
+					    !params.metadata_config.metadata_stride) {
+						printf("metadata unavailable (embedded data disabled or unsupported)\n");
+					}
+				}
 				printf("frame=%u frame_duration_us=%u\n",
 				       frames,
 				       params.metadata_config.frame_duration_us);

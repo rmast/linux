@@ -94,13 +94,15 @@ static unsigned short atomisp_get_sensor_fps(struct atomisp_sub_device *asd)
 	sd = isp->inputs[asd->input_curr].sensor_isp ?
 	     isp->inputs[asd->input_curr].sensor_isp :
 	     isp->inputs[asd->input_curr].sensor;
-	if (!sd)
-		return 0;
-
+	if (!sd) {
+			dev_info_once(isp->dev, "!sd!\n");
+			return 0;
+			}
 	dev_info_once(isp->dev, "FPS query uses %s subdev\n",
 			  isp->inputs[asd->input_curr].sensor_isp ?
 			  "sensor_isp" : "sensor");
 
+	fi.which = V4L2_SUBDEV_FORMAT_ACTIVE;
 	ret = v4l2_subdev_call_state_active(sd,
 					    pad, get_frame_interval, &fi);
 

@@ -165,13 +165,18 @@ static void atomisp_update_frame_duration(struct atomisp_sub_device *asd)
 		return;
 
 	ret = atomisp_get_sensor_timing(asd, &vblank, &hblank, &pixrate);
-	if (ret)
-		return;
+	if (ret) {
+		unsigned short fps = atomisp_get_sensor_fps(asd);
 
-	frame_length = sink->height + vblank;
-	line_length = sink->width + hblank;
-	duration_us = div_u64((u64)frame_length * line_length * 1000000ULL,
+		if (!fps)
+			return;
+		duration_us = div_u64(1000000ULL, fps);
+	} else {
+		frame_length = sink->height + vblank;
+		line_length = sink->width + hblank;
+		duration_us = div_u64((u64)frame_length * line_length * 1000000ULL,
 			      pixrate);
+	}
 
 	new_duration = min_t(u64, duration_us, U32_MAX);
 	old_duration = asd->params.frame_duration_us;

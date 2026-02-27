@@ -58,6 +58,7 @@
 #define MT9M114_LOGICAL_ADDRESS_ACCESS			CCI_REG16(0x098e)
 
 /* Sensor Core registers */
+#define MT9M114_FRAME_LENGTH_LINES				CCI_REG16(0x300a)
 #define MT9M114_COARSE_INTEGRATION_TIME			CCI_REG16(0x3012)
 #define MT9M114_FINE_INTEGRATION_TIME			CCI_REG16(0x3014)
 #define MT9M114_RESET_REGISTER				CCI_REG16(0x301a)
@@ -1111,8 +1112,8 @@ static inline struct mt9m114 *pa_ctrl_to_mt9m114(struct v4l2_ctrl *ctrl)
  * When enabled, all register writes are buffered in shadow registers.
  * When disabled, buffered writes are applied atomically at the next SOF.
  *
- * Critical for synchronizing VTS (Frame_Length_Lines) and Exposure
- * (Coarse_Integration_Time) to prevent rolling shutter artifacts.
+ * Critical for synchronizing VTS (Frame_length_lines) and Exposure
+ * (Coarse_integration_time) to prevent rolling shutter artifacts.
  *
  * Register: 0x8404 (GROUPED_PARAMETER_HOLD)
  *   0x0100 = Enable (buffer writes)
@@ -1137,38 +1138,22 @@ static int mt9m114_group_hold(struct mt9m114 *sensor, bool enable)
 	return 0;
 }
 
-/**
- * mt9m114_ensure_manual_ae - Disable sensor's internal auto-exposure
- * @sensor: The MT9M114 sensor
- *
- * The MT9M114 has an internal AE engine that can override manual exposure
- * commands. This function ensures the sensor is in manual AE mode before
- * writing exposure/VTS registers.
- *
- * Register: 0xA800 (AE_TRACK_MODE)
- *   BIT(0) = 1: Auto-exposure enabled (sensor controls exposure)
- *   BIT(0) = 0: Manual mode (V4L2 controls exposure)
- *
- * Returns: 0 on success, negative errno on failure
- */
 static int mt9m114_ensure_manual_ae(struct mt9m114 *sensor)
 {
 	u64 ae_track_mode;
 	int ret;
 
-	/* Read current AE_TRACK_MODE */
 	ret = cci_read(sensor->regmap, MT9M114_AE_TRACK_MODE, &ae_track_mode, NULL);
 	if (ret) {
 		dev_err(&sensor->client->dev, "Failed to read AE_TRACK_MODE: %d\n", ret);
 		return ret;
 	}
 
-	/* Check if internal AE is enabled */
 	if (ae_track_mode & MT9M114_AE_TRACK_MODE_AUTO_ENABLE) {
-		/* Disable internal AE to allow V4L2 manual control */
 		ret = cci_write(sensor->regmap, MT9M114_AE_TRACK_MODE, 0x00, NULL);
 		if (ret) {
-			dev_err(&sensor->client->dev, "Failed to disable internal AE: %d\n", ret);
+			dev_err(&sensor->client->dev,
+				"Failed to disable internal AE: %d\n", ret);
 			return ret;
 		}
 		dev_info(&sensor->client->dev,
@@ -1190,7 +1175,7 @@ static int mt9m114_ensure_manual_ae(struct mt9m114 *sensor)
  * Example: 30 FPS = 997 lines (976 active + 21 blanking)
  *          200ms exposure = ~6000 lines → VTS must be 6002, FPS drops to ~5
  *
- * CRITICAL: Hardware requires Integration_Time < Frame_Length_Lines - 2
+ * CRITICAL: Hardware requires Integration_time < Frame_length - 2
  *           If violated, sensor's timing generator freezes!
  *
  * Uses GROUP_HOLD (0x8404) to synchronize VTS and Exposure atomically.
@@ -1228,21 +1213,11 @@ static int mt9m114_update_vts_for_exposure(struct mt9m114 *sensor, u32 exposure)
 					MT9M114_MAX_VBLANK_LOWLIGHT, 1, new_vblank);
 }
 
-/**
- * mt9m114_apply_metering_preset - Write preset pattern to AE weight registers
- * @sensor: The MT9M114 sensor
- * @preset: Preset index (0-3)
- *
- * Writes all 25 metering weights (0x3190-0x31AB) atomically.
- * Each weight is 1 byte, values 0-8 (0=ignore, 8=max weight).
- *
- * Returns: 0 on success, negative errno on failure
- */
 static int mt9m114_apply_metering_preset(struct mt9m114 *sensor, unsigned int preset)
 {
 	const u8 *pattern;
-	int ret;
 	unsigned int i;
+	int ret;
 
 	if (preset >= ARRAY_SIZE(mt9m114_metering_patterns)) {
 		dev_err(&sensor->client->dev, "Invalid metering preset %u\n", preset);
@@ -1251,10 +1226,9 @@ static int mt9m114_apply_metering_preset(struct mt9m114 *sensor, unsigned int pr
 
 	pattern = mt9m114_metering_patterns[preset];
 
-	/* Write all 25 weights sequentially (0x3190 through 0x31AB) */
 	for (i = 0; i < 25; i++) {
 		ret = cci_write(sensor->regmap,
-				CCI_REG8(0x3190 + i),
+				MT9M114_AE_WEIGHT_TABLE_BASE + i,
 				pattern[i], NULL);
 		if (ret) {
 			dev_err(&sensor->client->dev,
@@ -1269,33 +1243,42 @@ static int mt9m114_apply_metering_preset(struct mt9m114 *sensor, unsigned int pr
 	return 0;
 }
 
-/**
- * mt9m114_write_exposure - Write exposure with VTS synchronization
- * @sensor: The MT9M114 sensor
- * @exposure: Exposure time in lines
- *
- * Ensures VTS is sufficient for the requested exposure, then writes
- * exposure to BOTH the PA register (0x3012) and the CAM register (0xC83C).
- *
- * Uses GROUP_HOLD to synchronize VTS and Exposure atomically.
- *
- * Returns: 0 on success, negative errno on failure
- */
-static int mt9m114_write_exposure(struct mt9m114 *sensor, u32 exposure)
+static int mt9m114_write_exposure(struct mt9m114 *sensor, u32 exposure,
+				  const struct v4l2_mbus_framefmt *format)
 {
+	u32 min_frame_length = exposure + 2;
+	u32 frame_length = format->height + sensor->pa.vblank->val;
+	u32 new_vblank;
 	int ret;
 
-	/* Ensure VTS is large enough for this exposure */
 	ret = mt9m114_update_vts_for_exposure(sensor, exposure);
 	if (ret)
 		return ret;
 
-	/* Write to both PA register (direct) and CAM register (SOC) */
-	ret = cci_write(sensor->regmap, MT9M114_COARSE_INTEGRATION_TIME, exposure, NULL);
-	if (ret == 0)
-		ret = cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
-				exposure, NULL);
-	return ret;
+	if (min_frame_length > frame_length) {
+		new_vblank = min_frame_length - format->height;
+		if (new_vblank > MT9M114_MAX_VBLANK_LOWLIGHT)
+			new_vblank = MT9M114_MAX_VBLANK_LOWLIGHT;
+
+		frame_length = format->height + new_vblank;
+
+		cci_write(sensor->regmap, MT9M114_FRAME_LENGTH_LINES,
+			  frame_length, &ret);
+		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
+			  frame_length, &ret);
+
+		sensor->pa.vblank->val = new_vblank;
+		sensor->pa.vblank->cur.val = new_vblank;
+	}
+
+	ret = cci_write(sensor->regmap, MT9M114_COARSE_INTEGRATION_TIME,
+			exposure, NULL);
+	if (ret)
+		return ret;
+
+	return cci_write(sensor->regmap,
+			 MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
+			 exposure, NULL);
 }
 
 static int mt9m114_pa_g_ctrl(struct v4l2_ctrl *ctrl)
@@ -1343,61 +1326,51 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct mt9m114 *sensor = pa_ctrl_to_mt9m114(ctrl);
 	const struct v4l2_mbus_framefmt *format;
 	struct v4l2_subdev_state *state;
+	unsigned int mask;
+	u32 value;
 	int ret = 0;
-	u64 mask;
 
-	/* V4L2 controls values are applied only when power is up. */
 	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
 		return 0;
 
-	/*
-	 * For exposure and VBLANK changes:
-	 * 1. Disable sensor's internal AE (if active)
-	 * 2. Use GROUP_HOLD to synchronize VTS and Exposure
-	 */
-	if (ctrl->id == V4L2_CID_EXPOSURE || ctrl->id == V4L2_CID_VBLANK ||
-	    ctrl->id == V4L2_CID_ANALOGUE_GAIN) {
-		/* Ensure manual AE mode before any exposure/gain/VTS changes */
-		ret = mt9m114_ensure_manual_ae(sensor);
-		if (ret) {
-			dev_err(&sensor->client->dev,
-				"Failed to ensure manual AE mode: %d\n", ret);
-			goto out;
-		}
-	}
-
-	/* Handle custom controls */
-	switch (ctrl->id) {
-	case V4L2_CID_MT9M114_AE_METERING_PRESET:
-		ret = mt9m114_apply_metering_preset(sensor, ctrl->val);
-		goto out;
-
-	case V4L2_CID_MT9M114_AE_TRACK_SPEED:
-		/*
-		 * AE Track Speed (0x31AC):
-		 * Controls how aggressively the AE engine adjusts exposure.
-		 * Higher values = faster convergence in low light.
-		 * Range: 0x00 (normal) to 0x07 (very fast)
-		 */
-		ret = cci_write(sensor->regmap, MT9M114_AE_TRACK_SPEED,
-				ctrl->val, &ret);
-		goto out;
-	}
-
-	state = v4l2_subdev_get_locked_active_state(&sensor->pa.sd);
+	state = v4l2_subdev_lock_and_get_active_state(&sensor->pa.sd);
 	format = v4l2_subdev_state_get_format(state, 0);
 
 	switch (ctrl->id) {
-	case V4L2_CID_HBLANK:
-		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_LINE_LENGTH_PCK,
-			  ctrl->val + format->width, &ret);
+	case V4L2_CID_MT9M114_AE_METERING_PRESET:
+		ret = mt9m114_apply_metering_preset(sensor, ctrl->val);
+		break;
+
+	case V4L2_CID_MT9M114_AE_TRACK_SPEED:
+		cci_write(sensor->regmap, MT9M114_AE_TRACK_SPEED,
+			  ctrl->val, &ret);
+		break;
+
+	case V4L2_CID_EXPOSURE:
+		ret = mt9m114_ensure_manual_ae(sensor);
+		if (ret)
+			break;
+
+		ret = mt9m114_group_hold(sensor, true);
+		if (ret)
+			break;
+
+		ret = mt9m114_write_exposure(sensor, ctrl->val, format);
+		if (ret)
+			mt9m114_group_hold(sensor, false);
+		else
+			ret = mt9m114_group_hold(sensor, false);
 		break;
 
 	case V4L2_CID_VBLANK:
+		ret = mt9m114_ensure_manual_ae(sensor);
+		if (ret)
+			break;
+
 		/*
 		 * VBLANK (Vertical Blanking Lines)
 		 *
-		 * Frame_Length_Lines = PIXEL_ARRAY_HEIGHT (976) + VBLANK
+		 * Frame_length_lines = PIXEL_ARRAY_HEIGHT (976) + VBLANK
 		 *
 		 * Uses GROUP_HOLD to synchronize with exposure if needed.
 		 * Writes to CAM register:
@@ -1407,8 +1380,10 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 		if (ret)
 			break;
 
+		value = ctrl->val + format->height;
+		cci_write(sensor->regmap, MT9M114_FRAME_LENGTH_LINES, value, &ret);
 		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
-			  ctrl->val + format->height, &ret);
+			  value, &ret);
 
 		/*
 		 * Updating the frame length may extend the frame interval,
@@ -1417,44 +1392,17 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 		 * two lines less than the frame length.
 		 */
 		__v4l2_ctrl_modify_range(sensor->pa.exposure, 1,
-					 ctrl->val + format->height - 2, 1,
+				 value - 2, 1,
 					 sensor->pa.exposure->default_value);
-
-		ret = mt9m114_group_hold(sensor, false);
-		break;
-
-	case V4L2_CID_EXPOSURE:
-		/*
-		 * Exposure (Coarse Integration Time)
-		 *
-		 * Uses GROUP_HOLD to synchronize with VTS if needed.
-		 * Writes to CAM register:
-		 *   0xC83C (CAM: CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME)
-		 *
-		 * If exposure exceeds current frame length, VTS is extended
-		 * automatically by mt9m114_write_exposure().
-		 */
-		ret = mt9m114_group_hold(sensor, true);
 		if (ret)
-			break;
-
-		ret = mt9m114_write_exposure(sensor, ctrl->val);
-		if (ret) {
 			mt9m114_group_hold(sensor, false);
-			break;
-		}
-
-		ret = mt9m114_group_hold(sensor, false);
+		else
+			ret = mt9m114_group_hold(sensor, false);
 		break;
 
-	case V4L2_CID_ANALOGUE_GAIN:
-		/*
-		 * The CAM_SENSOR_CONTROL_ANALOG_GAIN contains linear analog
-		 * gain values that are mapped to the GLOBAL_GAIN register
-		 * values by the sensor firmware.
-		 */
-		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_ANALOG_GAIN,
-			  ctrl->val, &ret);
+	case V4L2_CID_HBLANK:
+		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_LINE_LENGTH_PCK,
+			  ctrl->val + format->width, &ret);
 		break;
 
 	case V4L2_CID_HFLIP:
@@ -1476,7 +1424,7 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	}
 
-out:
+	v4l2_subdev_unlock_state(state);
 	pm_runtime_put_autosuspend(&sensor->client->dev);
 
 	return ret;

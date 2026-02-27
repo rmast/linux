@@ -86,11 +86,22 @@ static unsigned short atomisp_get_sensor_fps(struct atomisp_sub_device *asd)
 {
 	struct v4l2_subdev_frame_interval fi = { 0 };
 	struct atomisp_device *isp = asd->isp;
+	struct v4l2_subdev *sd;
 
 	unsigned short fps = 0;
 	int ret;
 
-	ret = v4l2_subdev_call_state_active(isp->inputs[asd->input_curr].sensor,
+	sd = isp->inputs[asd->input_curr].sensor_isp ?
+	     isp->inputs[asd->input_curr].sensor_isp :
+	     isp->inputs[asd->input_curr].sensor;
+	if (!sd)
+		return 0;
+
+	dev_info_once(isp->dev, "FPS query uses %s subdev\n",
+			  isp->inputs[asd->input_curr].sensor_isp ?
+			  "sensor_isp" : "sensor");
+
+	ret = v4l2_subdev_call_state_active(sd,
 					    pad, get_frame_interval, &fi);
 
 	if (!ret && fi.interval.numerator)

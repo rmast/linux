@@ -135,10 +135,15 @@ static int atomisp_get_sensor_timing(struct atomisp_sub_device *asd,
 		return -EIO;
 	*hblank = ctrl.value;
 
-	ctrl.id = V4L2_CID_PIXEL_RATE;
-	if (v4l2_g_ctrl(input->sensor->ctrl_handler, &ctrl))
-		return -EIO;
-	*pixrate = ctrl.value;
+	{
+		struct v4l2_ctrl *pixel_rate_ctrl;
+
+		pixel_rate_ctrl = v4l2_ctrl_find(input->sensor->ctrl_handler,
+						 V4L2_CID_PIXEL_RATE);
+		if (!pixel_rate_ctrl)
+			return -EINVAL;
+		*pixrate = v4l2_ctrl_g_ctrl_int64(pixel_rate_ctrl);
+	}
 	if (!*pixrate)
 		return -EINVAL;
 

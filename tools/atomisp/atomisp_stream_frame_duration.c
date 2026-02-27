@@ -62,6 +62,18 @@ static int xioctl(int fd, unsigned long request, void *arg)
 	return ret;
 }
 
+static int get_ctrl_u32(int fd, __u32 id, __u32 *value)
+{
+	struct v4l2_control ctrl;
+
+	memset(&ctrl, 0, sizeof(ctrl));
+	ctrl.id = id;
+	if (xioctl(fd, VIDIOC_G_CTRL, &ctrl) < 0)
+		return -1;
+	*value = ctrl.value;
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	const char *dev = "/dev/video0";
@@ -210,6 +222,14 @@ int main(int argc, char **argv)
 		frames++;
 		if (now_ms() >= next_print) {
 			if (xioctl(fd, ATOMISP_IOC_G_ISP_PARM, &params) == 0) {
+				__u32 vblank = 0;
+				__u32 hblank = 0;
+				__u32 pixel_rate = 0;
+				bool have_vblank = get_ctrl_u32(fd, V4L2_CID_VBLANK, &vblank) == 0;
+				bool have_hblank = get_ctrl_u32(fd, V4L2_CID_HBLANK, &hblank) == 0;
+				bool have_pixel_rate =
+					get_ctrl_u32(fd, V4L2_CID_PIXEL_RATE, &pixel_rate) == 0;
+
 				if (!reported_metadata) {
 					reported_metadata = true;
 					printf("metadata_height=%u metadata_stride=%u\n",
@@ -220,9 +240,16 @@ int main(int argc, char **argv)
 						printf("metadata unavailable (embedded data disabled or unsupported)\n");
 					}
 				}
-				printf("frame=%u frame_duration_us=%u\n",
+				printf("frame=%u frame_duration_us=%u",
 				       frames,
 				       params.metadata_config.frame_duration_us);
+				if (have_vblank)
+					printf(" vblank=%u", vblank);
+				if (have_hblank)
+					printf(" hblank=%u", hblank);
+				if (have_pixel_rate)
+					printf(" pixel_rate=%u", pixel_rate);
+				printf("\n");
 				fflush(stdout);
 			} else {
 				perror("ATOMISP_IOC_G_ISP_PARM");

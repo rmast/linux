@@ -36,9 +36,10 @@ struct buffer {
 static void usage(const char *prog)
 {
 	fprintf(stderr,
-		"Usage: %s [/dev/videoX] [interval_ms] [frames]\n"
+		"Usage: %s [/dev/videoX] [interval_ms] [frames] [subdev]\n"
 		"  interval_ms: print cadence (default 200)\n"
-		"  frames: number of frames to capture before exit (default: infinite)\n",
+		"  frames: number of frames to capture before exit (default: infinite)\n"
+		"  subdev: optional /dev/v4l-subdevX for vblank/hblank/pixel_rate\n",
 		prog);
 }
 
@@ -77,6 +78,7 @@ static int get_ctrl_u32(int fd, __u32 id, __u32 *value)
 int main(int argc, char **argv)
 {
 	const char *dev = "/dev/video0";
+	const char *subdev = NULL;
 	unsigned int interval_ms = 200;
 	unsigned int max_frames = 0;
 	struct atomisp_parm params;
@@ -90,6 +92,7 @@ int main(int argc, char **argv)
 	unsigned long long next_print;
 	bool reported_metadata = false;
 	int fd;
+	int sfd = -1;
 
 	if (argc > 1)
 		dev = argv[1];
@@ -97,7 +100,9 @@ int main(int argc, char **argv)
 		interval_ms = (unsigned int)atoi(argv[2]);
 	if (argc > 3)
 		max_frames = (unsigned int)atoi(argv[3]);
-	if (argc > 4) {
+	if (argc > 4)
+		subdev = argv[4];
+	if (argc > 5) {
 		usage(argv[0]);
 		return 1;
 	}
@@ -106,6 +111,15 @@ int main(int argc, char **argv)
 	if (fd < 0) {
 		perror("open");
 		return 1;
+	}
+
+	if (subdev) {
+		sfd = open(subdev, O_RDWR | O_NONBLOCK, 0);
+		if (sfd < 0) {
+			perror("open subdev");
+			close(fd);
+			return 1;
+		}
 	}
 
 	if (xioctl(fd, VIDIOC_QUERYCAP, &cap) < 0) {
@@ -225,10 +239,14 @@ int main(int argc, char **argv)
 				__u32 vblank = 0;
 				__u32 hblank = 0;
 				__u32 pixel_rate = 0;
-				bool have_vblank = get_ctrl_u32(fd, V4L2_CID_VBLANK, &vblank) == 0;
-				bool have_hblank = get_ctrl_u32(fd, V4L2_CID_HBLANK, &hblank) == 0;
+				__u32 exposure = 0;
+				int cfd = (sfd >= 0) ? sfd : fd;
+				bool have_vblank = get_ctrl_u32(cfd, V4L2_CID_VBLANK, &vblank) == 0;
+				bool have_hblank = get_ctrl_u32(cfd, V4L2_CID_HBLANK, &hblank) == 0;
 				bool have_pixel_rate =
-					get_ctrl_u32(fd, V4L2_CID_PIXEL_RATE, &pixel_rate) == 0;
+					get_ctrl_u32(cfd, V4L2_CID_PIXEL_RATE, &pixel_rate) == 0;
+				bool have_exposure =
+					get_ctrl_u32(cfd, V4L2_CID_EXPOSURE, &exposure) == 0;
 
 				if (!reported_metadata) {
 					reported_metadata = true;
@@ -249,6 +267,8 @@ int main(int argc, char **argv)
 					printf(" hblank=%u", hblank);
 				if (have_pixel_rate)
 					printf(" pixel_rate=%u", pixel_rate);
+				if (have_exposure)
+					printf(" exposure=%u", exposure);
 				printf("\n");
 				fflush(stdout);
 			} else {
@@ -271,6 +291,8 @@ int main(int argc, char **argv)
 	for (i = 0; i < BUF_COUNT; ++i)
 		munmap(bufs[i].start, bufs[i].length);
 
+	if (sfd >= 0)
+		close(sfd);
 	close(fd);
 	return 0;
 }

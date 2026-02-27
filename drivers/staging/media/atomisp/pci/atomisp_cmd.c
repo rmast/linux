@@ -8,6 +8,7 @@
  */
 #include <linux/errno.h>
 #include <linux/firmware.h>
+#include <linux/math64.h>
 #include <linux/pci.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -49,6 +50,8 @@
 #include "ia_css_stream.h"
 #include "ia_css_debug.h"
 #include "bits.h"
+#include "isp/kernels/s3a/s3a_1.0/ia_css_s3a.host.h"
+#include "isp/kernels/wb/wb_1.0/ia_css_wb.host.h"
 
 union host {
 	struct {
@@ -94,6 +97,96 @@ static unsigned short atomisp_get_sensor_fps(struct atomisp_sub_device *asd)
 		fps = fi.interval.denominator / fi.interval.numerator;
 
 	return fps;
+}
+
+#define ATOMISP_FRAME_DURATION_DELTA_US	10000U
+
+static int atomisp_get_sensor_timing(struct atomisp_sub_device *asd,
+				     u32 *vblank, u32 *hblank,
+				     u64 *pixrate)
+{
+	struct atomisp_device *isp = asd->isp;
+	struct atomisp_input_subdev *input = &isp->inputs[asd->input_curr];
+	struct v4l2_control ctrl = { 0 };
+
+	if (!input->sensor || !input->sensor->ctrl_handler)
+		return -ENODEV;
+
+	ctrl.id = V4L2_CID_VBLANK;
+	if (v4l2_g_ctrl(input->sensor->ctrl_handler, &ctrl))
+		return -EIO;
+	*vblank = ctrl.value;
+
+	ctrl.id = V4L2_CID_HBLANK;
+	if (v4l2_g_ctrl(input->sensor->ctrl_handler, &ctrl))
+		return -EIO;
+	*hblank = ctrl.value;
+
+	ctrl.id = V4L2_CID_PIXEL_RATE;
+	if (v4l2_g_ctrl(input->sensor->ctrl_handler, &ctrl))
+		return -EIO;
+	*pixrate = ctrl.value;
+	if (!*pixrate)
+		return -EINVAL;
+
+	return 0;
+}
+
+static void atomisp_reset_awb_on_timing_change(struct atomisp_sub_device *asd)
+{
+	struct atomisp_css_params *css_param = &asd->params.css_param;
+
+	css_param->wb_config = default_wb_config;
+	css_param->s3a_config = default_3a_config;
+	css_param->update_flag.wb_config =
+		(struct atomisp_wb_config *)&css_param->wb_config;
+	css_param->update_flag.a3a_config =
+		(struct atomisp_3a_config *)&css_param->s3a_config;
+	asd->params.css_update_params_needed = true;
+}
+
+static void atomisp_update_frame_duration(struct atomisp_sub_device *asd)
+{
+	const struct v4l2_mbus_framefmt *sink;
+	u64 pixrate;
+	u64 duration_us;
+	u32 vblank;
+	u32 hblank;
+	u32 frame_length;
+	u32 line_length;
+	u32 new_duration;
+	u32 old_duration;
+	int ret;
+
+	sink = atomisp_subdev_get_ffmt(&asd->subdev, NULL,
+					   V4L2_SUBDEV_FORMAT_ACTIVE,
+					   ATOMISP_SUBDEV_PAD_SINK);
+	if (!sink)
+		return;
+
+	ret = atomisp_get_sensor_timing(asd, &vblank, &hblank, &pixrate);
+	if (ret)
+		return;
+
+	frame_length = sink->height + vblank;
+	line_length = sink->width + hblank;
+	duration_us = div_u64((u64)frame_length * line_length * 1000000ULL,
+			      pixrate);
+
+	new_duration = min_t(u64, duration_us, U32_MAX);
+	old_duration = asd->params.frame_duration_us;
+
+	asd->params.frame_duration_prev_us = old_duration;
+	asd->params.frame_duration_us = new_duration;
+
+	if (old_duration && new_duration) {
+		u32 delta = old_duration > new_duration ?
+			    old_duration - new_duration :
+			    new_duration - old_duration;
+
+		if (delta >= ATOMISP_FRAME_DURATION_DELTA_US)
+			atomisp_reset_awb_on_timing_change(asd);
+	}
 }
 
 /*
@@ -712,6 +805,8 @@ void atomisp_buf_done(struct atomisp_sub_device *asd, int error,
 	case IA_CSS_BUFFER_TYPE_METADATA:
 		if (error)
 			break;
+
+		atomisp_update_frame_duration(asd);
 
 		md_type = ATOMISP_MAIN_METADATA;
 		list_for_each_entry_safe(md_iter, _md_buf_tmp,
@@ -3033,6 +3128,8 @@ int atomisp_param(struct atomisp_sub_device *asd, int flag,
 		config->metadata_config.metadata_stride = asd->
 			stream_env[ATOMISP_INPUT_STREAM_GENERAL].stream_info.
 			metadata_info.stride;
+		config->metadata_config.frame_duration_us =
+			asd->params.frame_duration_us;
 
 		/* update dvs grid info */
 		if (dvs_grid_info)

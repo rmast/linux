@@ -316,6 +316,7 @@ struct atomisp_xnr_config {
 struct atomisp_metadata_config {
 	u32 metadata_height;
 	u32 metadata_stride;
+	u32 frame_duration_us;
 };
 
 /*

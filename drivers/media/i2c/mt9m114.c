@@ -1039,40 +1039,66 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 	int ret;
 
 	ret = pm_runtime_resume_and_get(&sensor->client->dev);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: pm_runtime_resume_and_get failed: %d\n",
+			ret);
 		return ret;
+	}
 
 	ret = mt9m114_initialize(sensor);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: initialize failed: %d\n", ret);
 		goto error;
+	}
 
 	ret = mt9m114_configure_ifp(sensor, ifp_state);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: configure_ifp failed: %d\n", ret);
 		goto error;
+	}
 
 	ret = mt9m114_configure_pa(sensor, pa_state);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: configure_pa failed: %d\n", ret);
 		goto error;
+	}
 
 	ret = mt9m114_set_frame_rate(sensor);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: set_frame_rate failed: %d\n", ret);
 		goto error;
+	}
 
 	ret = __v4l2_ctrl_handler_setup(&sensor->pa.hdl);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: pa ctrl setup failed: %d\n", ret);
 		goto error;
+	}
 
 	ret = __v4l2_ctrl_handler_setup(&sensor->ifp.hdl);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: ifp ctrl setup failed: %d\n", ret);
 		goto error;
+	}
 
 	/*
 	 * The Change-Config state is transient and moves to the streaming
 	 * state automatically.
 	 */
 	ret = mt9m114_set_state(sensor, MT9M114_SYS_STATE_ENTER_CONFIG_CHANGE);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: set_state ENTER_CONFIG_CHANGE failed: %d\n",
+			ret);
 		goto error;
+	}
 
 	sensor->streaming = true;
 
@@ -1363,6 +1389,17 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_MT9M114_AE_RULE_ALGO:
 		cci_write(sensor->regmap, MT9M114_AE_RULE_ALGO,
 			  ctrl->val, &ret);
+		break;
+
+	case V4L2_CID_ANALOGUE_GAIN:
+		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_ANALOG_GAIN,
+			  ctrl->val, &ret);
+		cci_write(sensor->regmap, MT9M114_GLOBAL_GAIN,
+			  ctrl->val, &ret);
+		break;
+
+	case V4L2_CID_PIXEL_RATE:
+		/* Read-only, nothing to apply. */
 		break;
 
 	case V4L2_CID_EXPOSURE:
@@ -1794,10 +1831,16 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 	if (sensor->pa.gain)
 		sensor->pa.gain->flags |= V4L2_CTRL_FLAG_VOLATILE;
 
-	v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops,
-			  V4L2_CID_PIXEL_RATE,
-			  sensor->pixrate, sensor->pixrate, 1,
-			  sensor->pixrate);
+	{
+		struct v4l2_ctrl *pixel_rate;
+
+		pixel_rate = v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops,
+					 V4L2_CID_PIXEL_RATE,
+					 sensor->pixrate, sensor->pixrate, 1,
+					 sensor->pixrate);
+		if (pixel_rate)
+			pixel_rate->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	}
 
 	v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops,
 			  V4L2_CID_HFLIP,
@@ -1914,6 +1957,11 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 		if (ret)
 			break;
 
+		break;
+
+	case V4L2_CID_PIXEL_RATE:
+	case V4L2_CID_LINK_FREQ:
+		/* Read-only, nothing to apply. */
 		break;
 
 	case V4L2_CID_TEST_PATTERN:
@@ -2524,10 +2572,16 @@ static int mt9m114_ifp_init(struct mt9m114 *sensor)
 			link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	}
 
-	v4l2_ctrl_new_std(hdl, &mt9m114_ifp_ctrl_ops,
-			  V4L2_CID_PIXEL_RATE,
-			  sensor->pixrate, sensor->pixrate, 1,
-			  sensor->pixrate);
+	{
+		struct v4l2_ctrl *pixel_rate;
+
+		pixel_rate = v4l2_ctrl_new_std(hdl, &mt9m114_ifp_ctrl_ops,
+					 V4L2_CID_PIXEL_RATE,
+					 sensor->pixrate, sensor->pixrate, 1,
+					 sensor->pixrate);
+		if (pixel_rate)
+			pixel_rate->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	}
 
 	sensor->ifp.tpg[MT9M114_TPG_PATTERN] =
 		v4l2_ctrl_new_std_menu_items(hdl, &mt9m114_ifp_ctrl_ops,

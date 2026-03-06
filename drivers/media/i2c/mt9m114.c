@@ -1343,7 +1343,11 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
 		return 0;
 
-	state = v4l2_subdev_lock_and_get_active_state(&sensor->pa.sd);
+	state = v4l2_subdev_get_locked_active_state(&sensor->pa.sd);
+	if (!state) {
+		pm_runtime_put_autosuspend(&sensor->client->dev);
+		return -EINVAL;
+	}
 	format = v4l2_subdev_state_get_format(state, 0);
 
 	switch (ctrl->id) {
@@ -1439,7 +1443,6 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	}
 
-	v4l2_subdev_unlock_state(state);
 	pm_runtime_put_autosuspend(&sensor->client->dev);
 
 	return ret;

@@ -143,6 +143,20 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	if (fmt.fmt.pix.width == 0 || fmt.fmt.pix.height == 0 ||
+	    fmt.fmt.pix.pixelformat == 0) {
+		fmt.fmt.pix.width = 1280;
+		fmt.fmt.pix.height = 720;
+		fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_UYVY;
+		fmt.fmt.pix.field = V4L2_FIELD_NONE;
+	}
+
+	if (xioctl(fd, VIDIOC_S_FMT, &fmt) < 0) {
+		perror("VIDIOC_S_FMT");
+		close(fd);
+		return 1;
+	}
+
 	memset(&req, 0, sizeof(req));
 	req.count = BUF_COUNT;
 	req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;

@@ -361,6 +361,7 @@
 
 #define MT9M114_DEF_FRAME_RATE				30
 #define MT9M114_MAX_FRAME_RATE				120
+#define MT9M114_MIN_FRAME_RATE_FLOOR			5
 
 #define MT9M114_DEF_PIXCLOCK				48000000
 
@@ -496,6 +497,7 @@ struct mt9m114 {
 
 		struct v4l2_ctrl_handler hdl;
 		unsigned int frame_rate;
+		bool ae_auto;
 
 		struct v4l2_ctrl *tpg[4];
 		struct completion unregistered;
@@ -1019,17 +1021,83 @@ static int mt9m114_configure_ifp(struct mt9m114 *sensor,
 	return ret;
 }
 
+static unsigned int mt9m114_get_min_fps(struct mt9m114 *sensor);
+static void mt9m114_update_vblank_range_for_min_fps(struct mt9m114 *sensor,
+						   unsigned int min_fps);
+
 static int mt9m114_set_frame_rate(struct mt9m114 *sensor)
 {
-	u16 frame_rate = sensor->ifp.frame_rate << 8;
+	unsigned int max_fps = sensor->ifp.frame_rate;
+	unsigned int min_fps = sensor->ifp.ae_auto ? MT9M114_MIN_FRAME_RATE_FLOOR
+						 : max_fps;
+	u16 min_rate;
+	u16 max_rate;
 	int ret = 0;
 
+	if (min_fps > max_fps)
+		min_fps = max_fps;
+
+	min_rate = min_fps << 8;
+	max_rate = max_fps << 8;
+
 	cci_write(sensor->regmap, MT9M114_CAM_AET_MIN_FRAME_RATE,
-		  frame_rate, &ret);
+		  min_rate, &ret);
 	cci_write(sensor->regmap, MT9M114_CAM_AET_MAX_FRAME_RATE,
-		  frame_rate, &ret);
+		  max_rate, &ret);
+
+	mt9m114_update_vblank_range_for_min_fps(sensor, min_fps);
 
 	return ret;
+}
+
+static unsigned int mt9m114_get_min_fps(struct mt9m114 *sensor)
+{
+	if (!sensor->ifp.ae_auto)
+		return sensor->ifp.frame_rate;
+
+	return min_t(unsigned int, MT9M114_MIN_FRAME_RATE_FLOOR,
+		     sensor->ifp.frame_rate);
+}
+
+static void mt9m114_update_vblank_range_for_min_fps(struct mt9m114 *sensor,
+						   unsigned int min_fps)
+{
+	struct v4l2_subdev_state *state;
+	const struct v4l2_mbus_framefmt *format;
+	unsigned int line_length;
+	u32 max_vblank;
+	u64 frame_length;
+	u32 default_vblank;
+
+	if (!sensor->pa.vblank || !sensor->pa.hblank)
+		return;
+
+	if (!min_fps)
+		return;
+
+	state = v4l2_subdev_lock_and_get_active_state(&sensor->pa.sd);
+	format = v4l2_subdev_state_get_format(state, 0);
+
+	line_length = format->width + sensor->pa.hblank->val;
+	if (!line_length) {
+		v4l2_subdev_unlock_state(state);
+		return;
+	}
+
+	frame_length = div_u64((u64)sensor->pixrate,
+			       (u64)line_length * min_fps);
+	if (frame_length < format->height + MT9M114_MIN_VBLANK)
+		frame_length = format->height + MT9M114_MIN_VBLANK;
+	if (frame_length > MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX)
+		frame_length = MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX;
+
+	max_vblank = frame_length - format->height;
+	default_vblank = clamp_t(u32, sensor->pa.vblank->val,
+				 MT9M114_MIN_VBLANK, max_vblank);
+	__v4l2_ctrl_modify_range(sensor->pa.vblank, MT9M114_MIN_VBLANK,
+				 max_vblank, 1, default_vblank);
+
+	v4l2_subdev_unlock_state(state);
 }
 
 static int mt9m114_start_streaming(struct mt9m114 *sensor,
@@ -1320,6 +1388,8 @@ static int mt9m114_write_exposure(struct mt9m114 *sensor, u32 exposure,
 static int mt9m114_pa_g_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct mt9m114 *sensor = pa_ctrl_to_mt9m114(ctrl);
+	struct v4l2_subdev_state *state;
+	const struct v4l2_mbus_framefmt *format;
 	u64 value;
 	int ret;
 
@@ -1327,6 +1397,28 @@ static int mt9m114_pa_g_ctrl(struct v4l2_ctrl *ctrl)
 		return 0;
 
 	switch (ctrl->id) {
+	case V4L2_CID_VBLANK:
+		state = v4l2_subdev_lock_and_get_active_state(&sensor->pa.sd);
+		format = v4l2_subdev_state_get_format(state, 0);
+
+		ret = cci_read(sensor->regmap, MT9M114_FRAME_LENGTH_LINES,
+			       &value, NULL);
+		if (ret) {
+			v4l2_subdev_unlock_state(state);
+			break;
+		}
+
+		if (value <= format->height)
+			ctrl->val = MT9M114_MIN_VBLANK;
+		else
+			ctrl->val = clamp_t(u32, value - format->height,
+					 MT9M114_MIN_VBLANK,
+					 MT9M114_MAX_VBLANK_LOWLIGHT);
+
+		v4l2_subdev_unlock_state(state);
+		ret = 0;
+		break;
+
 	case V4L2_CID_EXPOSURE:
 		ret = cci_read(sensor->regmap,
 			       MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
@@ -1527,6 +1619,9 @@ static void mt9m114_pa_ctrl_update_blanking(struct mt9m114 *sensor,
 		  - format->height;
 	__v4l2_ctrl_modify_range(sensor->pa.vblank, MT9M114_MIN_VBLANK,
 				 max_blank, 1, MT9M114_DEF_VBLANK);
+
+	mt9m114_update_vblank_range_for_min_fps(sensor,
+					     mt9m114_get_min_fps(sensor));
 }
 
 /* -----------------------------------------------------------------------------
@@ -1923,6 +2018,16 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 		mt9m114_pa_ctrl_update_exposure(sensor,
 						ctrl->val != V4L2_EXPOSURE_AUTO);
 
+	if (ctrl->id == V4L2_CID_EXPOSURE_AUTO) {
+		sensor->ifp.ae_auto = ctrl->val == V4L2_EXPOSURE_AUTO;
+		if (sensor->pa.vblank) {
+			if (sensor->ifp.ae_auto)
+				sensor->pa.vblank->flags |= V4L2_CTRL_FLAG_VOLATILE;
+			else
+				sensor->pa.vblank->flags &= ~V4L2_CTRL_FLAG_VOLATILE;
+		}
+	}
+
 	/* V4L2 controls values are applied only when power is up. */
 	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
 		return 0;
@@ -1954,6 +2059,10 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 			value = 0;
 
 		cci_write(sensor->regmap, MT9M114_AE_TRACK_ALGO, value, &ret);
+		if (ret)
+			break;
+
+		ret = mt9m114_set_frame_rate(sensor);
 		if (ret)
 			break;
 
@@ -2551,6 +2660,7 @@ static int mt9m114_ifp_init(struct mt9m114 *sensor)
 		return ret;
 
 	sensor->ifp.frame_rate = MT9M114_DEF_FRAME_RATE;
+	sensor->ifp.ae_auto = true;
 
 	/* Initialize the control handler. */
 	v4l2_ctrl_handler_init(hdl, 8);
@@ -2571,6 +2681,9 @@ static int mt9m114_ifp_init(struct mt9m114 *sensor)
 		if (link_freq)
 			link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	}
+
+	if (sensor->pa.vblank)
+		sensor->pa.vblank->flags |= V4L2_CTRL_FLAG_VOLATILE;
 
 	{
 		struct v4l2_ctrl *pixel_rate;

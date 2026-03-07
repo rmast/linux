@@ -1026,7 +1026,8 @@ static void mt9m114_update_vblank_range_for_min_fps(struct mt9m114 *sensor,
 						   struct v4l2_subdev_state *state,
 						   unsigned int min_fps);
 
-static int mt9m114_set_frame_rate(struct mt9m114 *sensor)
+static int mt9m114_set_frame_rate_with_state(struct mt9m114 *sensor,
+					     struct v4l2_subdev_state *pa_state)
 {
 	unsigned int max_fps = sensor->ifp.frame_rate;
 	unsigned int min_fps = sensor->ifp.ae_auto ? MT9M114_MIN_FRAME_RATE_FLOOR
@@ -1046,9 +1047,14 @@ static int mt9m114_set_frame_rate(struct mt9m114 *sensor)
 	cci_write(sensor->regmap, MT9M114_CAM_AET_MAX_FRAME_RATE,
 		  max_rate, &ret);
 
-	mt9m114_update_vblank_range_for_min_fps(sensor, NULL, min_fps);
+	mt9m114_update_vblank_range_for_min_fps(sensor, pa_state, min_fps);
 
 	return ret;
+}
+
+static int mt9m114_set_frame_rate(struct mt9m114 *sensor)
+{
+	return mt9m114_set_frame_rate_with_state(sensor, NULL);
 }
 
 static unsigned int mt9m114_get_min_fps(struct mt9m114 *sensor)
@@ -1145,7 +1151,7 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 		goto error;
 	}
 
-	ret = mt9m114_set_frame_rate(sensor);
+	ret = mt9m114_set_frame_rate_with_state(sensor, pa_state);
 	if (ret) {
 		dev_err(&sensor->client->dev,
 			"start_stream: set_frame_rate failed: %d\n", ret);

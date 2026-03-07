@@ -1076,6 +1076,7 @@ static void mt9m114_update_vblank_range_for_min_fps(struct mt9m114 *sensor,
 	u32 max_vblank;
 	u64 frame_length;
 	u32 default_vblank;
+	bool locked = false;
 
 	if (!sensor->pa.vblank || !sensor->pa.hblank)
 		return;
@@ -1084,13 +1085,18 @@ static void mt9m114_update_vblank_range_for_min_fps(struct mt9m114 *sensor,
 		return;
 
 	if (!active_state)
+		active_state = v4l2_subdev_get_locked_active_state(&sensor->pa.sd);
+
+	if (!active_state) {
 		active_state = v4l2_subdev_lock_and_get_active_state(&sensor->pa.sd);
+		locked = true;
+	}
 
 	format = v4l2_subdev_state_get_format(active_state, 0);
 
 	line_length = format->width + sensor->pa.hblank->val;
 	if (!line_length) {
-		if (!state)
+		if (locked)
 			v4l2_subdev_unlock_state(active_state);
 		return;
 	}
@@ -1112,7 +1118,7 @@ static void mt9m114_update_vblank_range_for_min_fps(struct mt9m114 *sensor,
 	__v4l2_ctrl_modify_range(sensor->pa.vblank, MT9M114_MIN_VBLANK,
 				 max_vblank, 1, default_vblank);
 
-	if (!state)
+	if (locked)
 		v4l2_subdev_unlock_state(active_state);
 }
 

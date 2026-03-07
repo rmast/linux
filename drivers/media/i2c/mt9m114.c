@@ -488,6 +488,8 @@ struct mt9m114 {
 		struct v4l2_ctrl *ae_metering_preset;
 		struct v4l2_ctrl *ae_track_speed;
 		struct v4l2_ctrl *ae_rule_algo;
+		u32 active_width;
+		u32 active_height;
 	} pa;
 
 	/* Image Flow Processor */
@@ -1410,8 +1412,6 @@ static int mt9m114_write_exposure(struct mt9m114 *sensor, u32 exposure,
 static int mt9m114_pa_g_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct mt9m114 *sensor = pa_ctrl_to_mt9m114(ctrl);
-	struct v4l2_subdev_state *state;
-	const struct v4l2_mbus_framefmt *format;
 	u64 value;
 	int ret;
 
@@ -1420,24 +1420,20 @@ static int mt9m114_pa_g_ctrl(struct v4l2_ctrl *ctrl)
 
 	switch (ctrl->id) {
 	case V4L2_CID_VBLANK:
-		state = v4l2_subdev_lock_and_get_active_state(&sensor->pa.sd);
-		format = v4l2_subdev_state_get_format(state, 0);
-
 		ret = cci_read(sensor->regmap, MT9M114_FRAME_LENGTH_LINES,
 			       &value, NULL);
-		if (ret) {
-			v4l2_subdev_unlock_state(state);
+		if (ret)
 			break;
-		}
 
-		if (value <= format->height)
+		if (!sensor->pa.active_height)
+			sensor->pa.active_height = MT9M114_PIXEL_ARRAY_HEIGHT;
+
+		if (value <= sensor->pa.active_height)
 			ctrl->val = MT9M114_MIN_VBLANK;
 		else
-			ctrl->val = clamp_t(u32, value - format->height,
+			ctrl->val = clamp_t(u32, value - sensor->pa.active_height,
 					 MT9M114_MIN_VBLANK,
 					 MT9M114_MAX_VBLANK_LOWLIGHT);
-
-		v4l2_subdev_unlock_state(state);
 		ret = 0;
 		break;
 
@@ -1637,6 +1633,9 @@ static void mt9m114_pa_ctrl_update_blanking(struct mt9m114 *sensor,
 		  - format->width;
 	__v4l2_ctrl_modify_range(sensor->pa.hblank, MT9M114_MIN_HBLANK,
 				 max_blank, 1, MT9M114_DEF_HBLANK);
+
+	sensor->pa.active_width = format->width;
+	sensor->pa.active_height = format->height;
 
 	max_blank = MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX
 		  - format->height;

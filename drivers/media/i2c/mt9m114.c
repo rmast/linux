@@ -58,6 +58,7 @@
 #define MT9M114_ACCESS_CTL_STAT				CCI_REG16(0x0982)
 #define MT9M114_PHYSICAL_ADDRESS_ACCESS			CCI_REG16(0x098a)
 #define MT9M114_LOGICAL_ADDRESS_ACCESS			CCI_REG16(0x098e)
+#define MT9M114_MCU_VARIABLE_DATA0			CCI_REG16(0x0990)
 
 /* Sensor Core registers */
 #define MT9M114_FRAME_LENGTH_LINES				CCI_REG16(0x300a)
@@ -2163,6 +2164,90 @@ static inline struct mt9m114 *ifp_ctrl_to_mt9m114(struct v4l2_ctrl *ctrl)
 	return container_of(ctrl->handler, struct mt9m114, ifp.hdl);
 }
 
+static int mt9m114_read_logical_u16(struct mt9m114 *sensor, u16 address,
+				    u16 *value)
+{
+	u64 raw = 0;
+	int ret = 0;
+
+	cci_write(sensor->regmap, MT9M114_LOGICAL_ADDRESS_ACCESS, address, &ret);
+	cci_read(sensor->regmap, MT9M114_MCU_VARIABLE_DATA0, &raw, &ret);
+	if (ret)
+		return ret;
+
+	*value = raw;
+
+	return 0;
+}
+
+static int mt9m114_dump_stats(struct mt9m114 *sensor)
+{
+	static const u16 blc_addr = 0x0a06;
+	static const u16 stats_start = 0x0a54;
+	static const u16 stats_end = 0x0a86;
+	static const unsigned int values_per_line = 5;
+	u16 values[((stats_end - stats_start) / 2) + 1];
+	u16 blc = 0;
+	unsigned int i;
+	int ret;
+
+	ret = mt9m114_read_logical_u16(sensor, blc_addr, &blc);
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"debug-dump: failed reading BLC 0x%04x (%d)\n",
+			blc_addr, ret);
+		return ret;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(values); i++) {
+		u16 addr = stats_start + i * 2;
+
+		ret = mt9m114_read_logical_u16(sensor, addr, &values[i]);
+		if (ret) {
+			dev_err(&sensor->client->dev,
+				"debug-dump: failed reading AE zone @0x%04x (%d)\n",
+				addr, ret);
+			return ret;
+		}
+	}
+
+	dev_info(&sensor->client->dev,
+		 "debug-dump: logical BLC[0x%04x]=0x%04x (%u)\n",
+		 blc_addr, blc, blc);
+
+	for (i = 0; i < ARRAY_SIZE(values); i += values_per_line) {
+		unsigned int end = min(i + values_per_line, (unsigned int)ARRAY_SIZE(values));
+
+		if (end - i == 5)
+			dev_info(&sensor->client->dev,
+				 "debug-dump: AE[0x%04x..0x%04x] = %u %u %u %u %u\n",
+				 stats_start + i * 2, stats_start + (end - 1) * 2,
+				 values[i], values[i + 1], values[i + 2], values[i + 3], values[i + 4]);
+		else if (end - i == 4)
+			dev_info(&sensor->client->dev,
+				 "debug-dump: AE[0x%04x..0x%04x] = %u %u %u %u\n",
+				 stats_start + i * 2, stats_start + (end - 1) * 2,
+				 values[i], values[i + 1], values[i + 2], values[i + 3]);
+		else if (end - i == 3)
+			dev_info(&sensor->client->dev,
+				 "debug-dump: AE[0x%04x..0x%04x] = %u %u %u\n",
+				 stats_start + i * 2, stats_start + (end - 1) * 2,
+				 values[i], values[i + 1], values[i + 2]);
+		else if (end - i == 2)
+			dev_info(&sensor->client->dev,
+				 "debug-dump: AE[0x%04x..0x%04x] = %u %u\n",
+				 stats_start + i * 2, stats_start + (end - 1) * 2,
+				 values[i], values[i + 1]);
+		else
+			dev_info(&sensor->client->dev,
+				 "debug-dump: AE[0x%04x..0x%04x] = %u\n",
+				 stats_start + i * 2, stats_start + (end - 1) * 2,
+				 values[i]);
+	}
+
+	return 0;
+}
+
 static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct mt9m114 *sensor = ifp_ctrl_to_mt9m114(ctrl);
@@ -2184,6 +2269,18 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 
 		if (!sensor->ifp.ae_auto)
 			cancel_delayed_work_sync(&sensor->ifp.smart_meter_work);
+	}
+
+	if (ctrl->id == V4L2_CID_ILLUMINATORS_1) {
+		ret = pm_runtime_resume_and_get(&sensor->client->dev);
+		if (ret < 0)
+			return ret;
+
+		ret = mt9m114_dump_stats(sensor);
+
+		pm_runtime_put_autosuspend(&sensor->client->dev);
+
+		return ret;
 	}
 
 	/* V4L2 controls values are applied only when power is up. */
@@ -2241,6 +2338,10 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_PIXEL_RATE:
 	case V4L2_CID_LINK_FREQ:
 		/* Read-only, nothing to apply. */
+		break;
+
+	case V4L2_CID_ILLUMINATORS_1:
+		ret = 0;
 		break;
 
 	case V4L2_CID_TEST_PATTERN:
@@ -2836,7 +2937,7 @@ static int mt9m114_ifp_init(struct mt9m114 *sensor)
 			  mt9m114_smart_metering_work);
 
 	/* Initialize the control handler. */
-	v4l2_ctrl_handler_init(hdl, 8);
+	v4l2_ctrl_handler_init(hdl, 9);
 	v4l2_ctrl_new_std(hdl, &mt9m114_ifp_ctrl_ops,
 			  V4L2_CID_AUTO_WHITE_BALANCE,
 			  0, 1, 1, 1);
@@ -2844,6 +2945,9 @@ static int mt9m114_ifp_init(struct mt9m114 *sensor)
 			       V4L2_CID_EXPOSURE_AUTO,
 			       V4L2_EXPOSURE_MANUAL, 0,
 			       V4L2_EXPOSURE_AUTO);
+	v4l2_ctrl_new_std(hdl, &mt9m114_ifp_ctrl_ops,
+			  V4L2_CID_ILLUMINATORS_1,
+			  0, 1, 1, 0);
 
 	if (sensor->bus_cfg.nr_of_link_frequencies) {
 		link_freq = v4l2_ctrl_new_int_menu(hdl, &mt9m114_ifp_ctrl_ops,

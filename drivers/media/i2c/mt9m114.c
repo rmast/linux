@@ -16,6 +16,7 @@
 #include <linux/errno.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
+#include <linux/jiffies.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -25,6 +26,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/types.h>
 #include <linux/videodev2.h>
+#include <linux/workqueue.h>
 
 #include <media/v4l2-async.h>
 #include <media/v4l2-cci.h>
@@ -363,6 +365,16 @@
 #define MT9M114_MAX_FRAME_RATE				120
 #define MT9M114_MIN_FRAME_RATE_FLOOR			5
 
+#define MT9M114_SMART_METER_INTERVAL_MS			500
+#define MT9M114_SMART_METER_HYSTERESIS			(2 * HZ)
+#define MT9M114_SMART_METER_BACKLIT_DELTA		24
+#define MT9M114_SMART_METER_UNIFORM_DELTA		8
+
+#define MT9M114_SMART_AE_STATS_AVG_LUMA			CCI_REG8(0x3108)
+#define MT9M114_SMART_AE_STATS_CENTER_LUMA		CCI_REG8(0x310a)
+#define MT9M114_SMART_BLC_CTRL				CCI_REG8(0x3102)
+#define MT9M114_SMART_BLC_ENABLE			BIT(0)
+
 #define MT9M114_DEF_PIXCLOCK				48000000
 
 #define MT9M114_PIXEL_ARRAY_WIDTH			1296U
@@ -453,6 +465,16 @@ static const char * const mt9m114_ae_rule_algo_names[] = {
 	NULL,
 };
 
+static bool mt9m114_smart_metering = true;
+module_param_named(smart_metering, mt9m114_smart_metering, bool, 0644);
+MODULE_PARM_DESC(smart_metering,
+		 "Enable contrast-aware AE metering switching during streaming");
+
+static bool mt9m114_smart_metering_blc;
+module_param_named(smart_metering_blc, mt9m114_smart_metering_blc, bool, 0644);
+MODULE_PARM_DESC(smart_metering_blc,
+		 "Enable backlight compensation bit toggling at register 0x3102");
+
 struct mt9m114_format_info {
 	u32 code;
 	u32 output_format;
@@ -500,6 +522,11 @@ struct mt9m114 {
 		struct v4l2_ctrl_handler hdl;
 		unsigned int frame_rate;
 		bool ae_auto;
+		struct delayed_work smart_meter_work;
+		unsigned int smart_metering_active_preset;
+		unsigned long smart_metering_last_switch;
+		u8 smart_last_scene_avg;
+		u8 smart_last_center_avg;
 
 		struct v4l2_ctrl *tpg[4];
 		struct completion unregistered;
@@ -1194,6 +1221,16 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 
 	sensor->streaming = true;
 
+	if (mt9m114_smart_metering && sensor->ifp.ae_auto) {
+		sensor->ifp.smart_metering_last_switch = 0;
+		sensor->ifp.smart_metering_active_preset =
+			sensor->pa.ae_metering_preset ?
+			sensor->pa.ae_metering_preset->val :
+			MT9M114_METERING_PRESET_CENTER;
+		schedule_delayed_work(&sensor->ifp.smart_meter_work,
+				      msecs_to_jiffies(MT9M114_SMART_METER_INTERVAL_MS));
+	}
+
 	return 0;
 
 error:
@@ -1207,6 +1244,7 @@ static int mt9m114_stop_streaming(struct mt9m114 *sensor)
 	int ret;
 
 	sensor->streaming = false;
+	cancel_delayed_work_sync(&sensor->ifp.smart_meter_work);
 
 	ret = mt9m114_set_state(sensor, MT9M114_SYS_STATE_ENTER_SUSPEND);
 
@@ -1369,6 +1407,101 @@ static int mt9m114_apply_metering_preset(struct mt9m114 *sensor, unsigned int pr
 		mt9m114_metering_preset_names[preset]);
 
 	return 0;
+}
+
+static unsigned int mt9m114_smart_metering_candidate(u8 scene_avg, u8 center_avg)
+{
+	unsigned int delta = abs((int)scene_avg - (int)center_avg);
+
+	if (center_avg + MT9M114_SMART_METER_BACKLIT_DELTA < scene_avg)
+		return MT9M114_METERING_PRESET_BACKLIT;
+
+	if (delta <= MT9M114_SMART_METER_UNIFORM_DELTA)
+		return MT9M114_METERING_PRESET_UNIFORM;
+
+	return MT9M114_METERING_PRESET_CENTER;
+}
+
+static void mt9m114_smart_metering_set_blc(struct mt9m114 *sensor, bool enable)
+{
+	int ret;
+
+	if (!mt9m114_smart_metering_blc)
+		return;
+
+	ret = cci_update_bits(sensor->regmap, MT9M114_SMART_BLC_CTRL,
+			      MT9M114_SMART_BLC_ENABLE,
+			      enable ? MT9M114_SMART_BLC_ENABLE : 0, NULL);
+	if (ret)
+		dev_dbg(&sensor->client->dev,
+			"smart-meter: BLC update failed (%d)\n", ret);
+}
+
+static void mt9m114_smart_metering_work(struct work_struct *work)
+{
+	struct mt9m114 *sensor = container_of(to_delayed_work(work),
+					      struct mt9m114,
+					      ifp.smart_meter_work);
+	u64 scene_u64;
+	u64 center_u64;
+	unsigned int candidate;
+	u8 scene_avg;
+	u8 center_avg;
+	int ret;
+
+	if (!sensor->streaming || !sensor->ifp.ae_auto || !mt9m114_smart_metering)
+		return;
+
+	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
+		goto reschedule;
+
+	ret = cci_read(sensor->regmap, MT9M114_SMART_AE_STATS_AVG_LUMA,
+		       &scene_u64, NULL);
+	if (ret)
+		goto out_pm;
+
+	ret = cci_read(sensor->regmap, MT9M114_SMART_AE_STATS_CENTER_LUMA,
+		       &center_u64, NULL);
+	if (ret)
+		goto out_pm;
+
+	scene_avg = scene_u64;
+	center_avg = center_u64;
+	sensor->ifp.smart_last_scene_avg = scene_avg;
+	sensor->ifp.smart_last_center_avg = center_avg;
+
+	candidate = mt9m114_smart_metering_candidate(scene_avg, center_avg);
+	if (candidate != sensor->ifp.smart_metering_active_preset &&
+	    (sensor->ifp.smart_metering_last_switch == 0 ||
+	     time_after_eq(jiffies,
+			   sensor->ifp.smart_metering_last_switch +
+			   MT9M114_SMART_METER_HYSTERESIS))) {
+		ret = mt9m114_apply_metering_preset(sensor, candidate);
+		if (!ret) {
+			sensor->ifp.smart_metering_active_preset = candidate;
+			sensor->ifp.smart_metering_last_switch = jiffies;
+
+			if (sensor->pa.ae_metering_preset) {
+				sensor->pa.ae_metering_preset->val = candidate;
+				sensor->pa.ae_metering_preset->cur.val = candidate;
+			}
+
+			dev_dbg(&sensor->client->dev,
+				"smart-meter: preset=%u scene=%u center=%u\n",
+				candidate, scene_avg, center_avg);
+		}
+	}
+
+	mt9m114_smart_metering_set_blc(sensor,
+				       candidate == MT9M114_METERING_PRESET_BACKLIT);
+
+out_pm:
+	pm_runtime_put_autosuspend(&sensor->client->dev);
+
+reschedule:
+	if (sensor->streaming && sensor->ifp.ae_auto && mt9m114_smart_metering)
+		schedule_delayed_work(&sensor->ifp.smart_meter_work,
+				      msecs_to_jiffies(MT9M114_SMART_METER_INTERVAL_MS));
 }
 
 static int mt9m114_write_exposure(struct mt9m114 *sensor, u32 exposure,
@@ -2048,6 +2181,9 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 			else
 				sensor->pa.vblank->flags &= ~V4L2_CTRL_FLAG_VOLATILE;
 		}
+
+		if (!sensor->ifp.ae_auto)
+			cancel_delayed_work_sync(&sensor->ifp.smart_meter_work);
 	}
 
 	/* V4L2 controls values are applied only when power is up. */
@@ -2087,6 +2223,18 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = mt9m114_set_frame_rate(sensor);
 		if (ret)
 			break;
+
+		if (sensor->ifp.ae_auto && sensor->streaming && mt9m114_smart_metering) {
+			sensor->ifp.smart_metering_last_switch = 0;
+			sensor->ifp.smart_metering_active_preset =
+				sensor->pa.ae_metering_preset ?
+				sensor->pa.ae_metering_preset->val :
+				MT9M114_METERING_PRESET_CENTER;
+			schedule_delayed_work(&sensor->ifp.smart_meter_work,
+					      msecs_to_jiffies(MT9M114_SMART_METER_INTERVAL_MS));
+		} else {
+			mt9m114_smart_metering_set_blc(sensor, false);
+		}
 
 		break;
 
@@ -2683,6 +2831,9 @@ static int mt9m114_ifp_init(struct mt9m114 *sensor)
 
 	sensor->ifp.frame_rate = MT9M114_DEF_FRAME_RATE;
 	sensor->ifp.ae_auto = true;
+	sensor->ifp.smart_metering_active_preset = MT9M114_METERING_PRESET_CENTER;
+	INIT_DELAYED_WORK(&sensor->ifp.smart_meter_work,
+			  mt9m114_smart_metering_work);
 
 	/* Initialize the control handler. */
 	v4l2_ctrl_handler_init(hdl, 8);
@@ -2760,6 +2911,7 @@ error:
 
 static void mt9m114_ifp_cleanup(struct mt9m114 *sensor)
 {
+	cancel_delayed_work_sync(&sensor->ifp.smart_meter_work);
 	v4l2_ctrl_handler_free(&sensor->ifp.hdl);
 	media_entity_cleanup(&sensor->ifp.sd.entity);
 }

@@ -1023,6 +1023,7 @@ static int mt9m114_configure_ifp(struct mt9m114 *sensor,
 
 static unsigned int mt9m114_get_min_fps(struct mt9m114 *sensor);
 static void mt9m114_update_vblank_range_for_min_fps(struct mt9m114 *sensor,
+						   struct v4l2_subdev_state *state,
 						   unsigned int min_fps);
 
 static int mt9m114_set_frame_rate(struct mt9m114 *sensor)
@@ -1045,7 +1046,7 @@ static int mt9m114_set_frame_rate(struct mt9m114 *sensor)
 	cci_write(sensor->regmap, MT9M114_CAM_AET_MAX_FRAME_RATE,
 		  max_rate, &ret);
 
-	mt9m114_update_vblank_range_for_min_fps(sensor, min_fps);
+	mt9m114_update_vblank_range_for_min_fps(sensor, NULL, min_fps);
 
 	return ret;
 }
@@ -1060,9 +1061,10 @@ static unsigned int mt9m114_get_min_fps(struct mt9m114 *sensor)
 }
 
 static void mt9m114_update_vblank_range_for_min_fps(struct mt9m114 *sensor,
+						   struct v4l2_subdev_state *state,
 						   unsigned int min_fps)
 {
-	struct v4l2_subdev_state *state;
+	struct v4l2_subdev_state *active_state = state;
 	const struct v4l2_mbus_framefmt *format;
 	unsigned int line_length;
 	u32 max_vblank;
@@ -1075,12 +1077,15 @@ static void mt9m114_update_vblank_range_for_min_fps(struct mt9m114 *sensor,
 	if (!min_fps)
 		return;
 
-	state = v4l2_subdev_lock_and_get_active_state(&sensor->pa.sd);
-	format = v4l2_subdev_state_get_format(state, 0);
+	if (!active_state)
+		active_state = v4l2_subdev_lock_and_get_active_state(&sensor->pa.sd);
+
+	format = v4l2_subdev_state_get_format(active_state, 0);
 
 	line_length = format->width + sensor->pa.hblank->val;
 	if (!line_length) {
-		v4l2_subdev_unlock_state(state);
+		if (!state)
+			v4l2_subdev_unlock_state(active_state);
 		return;
 	}
 
@@ -1094,10 +1099,15 @@ static void mt9m114_update_vblank_range_for_min_fps(struct mt9m114 *sensor,
 	max_vblank = frame_length - format->height;
 	default_vblank = clamp_t(u32, sensor->pa.vblank->val,
 				 MT9M114_MIN_VBLANK, max_vblank);
+
+	dev_dbg(&sensor->client->dev,
+		"vblank range update: min_fps=%u line_len=%u frame_len=%llu max_vblank=%u default_vblank=%u\n",
+		min_fps, line_length, frame_length, max_vblank, default_vblank);
 	__v4l2_ctrl_modify_range(sensor->pa.vblank, MT9M114_MIN_VBLANK,
 				 max_vblank, 1, default_vblank);
 
-	v4l2_subdev_unlock_state(state);
+	if (!state)
+		v4l2_subdev_unlock_state(active_state);
 }
 
 static int mt9m114_start_streaming(struct mt9m114 *sensor,
@@ -1605,6 +1615,7 @@ static void mt9m114_pa_ctrl_update_exposure(struct mt9m114 *sensor, bool manual)
 }
 
 static void mt9m114_pa_ctrl_update_blanking(struct mt9m114 *sensor,
+					    struct v4l2_subdev_state *state,
 					    const struct v4l2_mbus_framefmt *format)
 {
 	unsigned int max_blank;
@@ -1620,8 +1631,8 @@ static void mt9m114_pa_ctrl_update_blanking(struct mt9m114 *sensor,
 	__v4l2_ctrl_modify_range(sensor->pa.vblank, MT9M114_MIN_VBLANK,
 				 max_blank, 1, MT9M114_DEF_VBLANK);
 
-	mt9m114_update_vblank_range_for_min_fps(sensor,
-					     mt9m114_get_min_fps(sensor));
+	mt9m114_update_vblank_range_for_min_fps(sensor, state,
+						     mt9m114_get_min_fps(sensor));
 }
 
 /* -----------------------------------------------------------------------------
@@ -1713,7 +1724,7 @@ static int mt9m114_pa_set_fmt(struct v4l2_subdev *sd,
 	fmt->format = *format;
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
-		mt9m114_pa_ctrl_update_blanking(sensor, format);
+		mt9m114_pa_ctrl_update_blanking(sensor, state, format);
 
 	return 0;
 }
@@ -1787,7 +1798,7 @@ static int mt9m114_pa_set_selection(struct v4l2_subdev *sd,
 	if (sel->which != V4L2_SUBDEV_FORMAT_ACTIVE)
 		return ret;
 
-	mt9m114_pa_ctrl_update_blanking(sensor, format);
+	mt9m114_pa_ctrl_update_blanking(sensor, state, format);
 
 	/* Apply values immediately if streaming. */
 	if (sensor->streaming) {
@@ -1958,7 +1969,7 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 	/* Update the range of the blanking controls based on the format. */
 	state = v4l2_subdev_lock_and_get_active_state(sd);
 	format = v4l2_subdev_state_get_format(state, 0);
-	mt9m114_pa_ctrl_update_blanking(sensor, format);
+	mt9m114_pa_ctrl_update_blanking(sensor, state, format);
 	v4l2_subdev_unlock_state(state);
 
 	sd->ctrl_handler = hdl;

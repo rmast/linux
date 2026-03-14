@@ -27,6 +27,12 @@
 #include "device_access.h"
 #include "irq.h"
 
+/* Allow some extra tolerance for sensors (e.g. MT9M114) whose IFP
+ * reports sizes with a few pixels of extra padding compared to the
+ * native rectangle used by AtomISP. See LOWRES_640_ROOT_CAUSE_ANALYSIS.md
+ */
+#define MT9M114_ATOMISP_MAX_PADDING 16U
+
 static const char *DRIVER = "atomisp";	/* max size 15 */
 static const char *CARD = "ATOM ISP";	/* max size 31 */
 
@@ -479,8 +485,8 @@ static int atomisp_enum_framesizes_crop_inner(struct atomisp_device *isp,
 		atomisp_get_padding(isp, frame_sizes[i].width, frame_sizes[i].height,
 				    &padding_w, &padding_h);
 
-		if ((frame_sizes[i].width + padding_w) > native->width ||
-		    (frame_sizes[i].height + padding_h) > native->height) {
+		if ((frame_sizes[i].width + padding_w) > (native->width + MT9M114_ATOMISP_MAX_PADDING) ||
+			(frame_sizes[i].height + padding_h) > (native->height + MT9M114_ATOMISP_MAX_PADDING)) {
 			/*
 			 * In binning mode, mandatory ISP padding may exceed the
 			 * binned native size for valid low-res modes such as 640x480.

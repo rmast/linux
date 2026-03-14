@@ -455,6 +455,7 @@ static int atomisp_enum_framesizes_crop_inner(struct atomisp_device *isp,
 					      struct v4l2_frmsizeenum *fsize,
 					      const struct v4l2_rect *active,
 					      const struct v4l2_rect *native,
+					      bool binning_pass,
 					      int *valid_sizes)
 {
 	static const struct v4l2_frmsize_discrete frame_sizes[] = {
@@ -469,6 +470,7 @@ static int atomisp_enum_framesizes_crop_inner(struct atomisp_device *isp,
 		{ 1280,  720 },
 		{  800,  600 },
 		{  640,  480 },
+		{  640,  360 },
 	};
 	u32 padding_w, padding_h;
 	int i;
@@ -478,8 +480,18 @@ static int atomisp_enum_framesizes_crop_inner(struct atomisp_device *isp,
 				    &padding_w, &padding_h);
 
 		if ((frame_sizes[i].width + padding_w) > native->width ||
-		    (frame_sizes[i].height + padding_h) > native->height)
-			continue;
+		    (frame_sizes[i].height + padding_h) > native->height) {
+			/*
+			 * In binning mode, mandatory ISP padding may exceed the
+			 * binned native size for valid low-res modes such as 640x480.
+			 * Keep rejecting true oversize requests, but allow these when
+			 * the raw requested size still fits the native rectangle.
+			 */
+			if (!binning_pass ||
+			    frame_sizes[i].width > native->width ||
+			    frame_sizes[i].height > native->height)
+				continue;
+		}
 
 		/*
 		 * Skip sizes where width and height are less then 5/8th of the
@@ -509,7 +521,9 @@ static int atomisp_enum_framesizes_crop(struct atomisp_device *isp,
 	struct v4l2_rect native = input->native_rect;
 	int ret, valid_sizes = 0;
 
-	ret = atomisp_enum_framesizes_crop_inner(isp, fsize, &active, &native, &valid_sizes);
+	ret = atomisp_enum_framesizes_crop_inner(isp, fsize, &active, &native,
+						 false,
+						 &valid_sizes);
 	if (ret == 0)
 		return 0;
 
@@ -521,7 +535,9 @@ static int atomisp_enum_framesizes_crop(struct atomisp_device *isp,
 	native.width /= 2;
 	native.height /= 2;
 
-	return atomisp_enum_framesizes_crop_inner(isp, fsize, &active, &native, &valid_sizes);
+	return atomisp_enum_framesizes_crop_inner(isp, fsize, &active, &native,
+						 true,
+						 &valid_sizes);
 }
 
 static int atomisp_enum_framesizes(struct file *file, void *priv,

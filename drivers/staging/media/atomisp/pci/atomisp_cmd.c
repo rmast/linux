@@ -4051,7 +4051,7 @@ static inline int atomisp_set_sensor_mipi_to_isp(
 
 	/* Compatibility for sensors which provide no media bus code
 	 * in s_mbus_framefmt() nor support pad formats. */
-	if (mipi_info && mipi_info->input_format != -1) {
+	if (mipi_info && mipi_info->input_format != -1 && !input->sensor_isp) {
 		bayer_order = mipi_info->raw_bayer_order;
 
 		/* Input stream config is still needs configured */
@@ -4075,6 +4075,10 @@ static inline int atomisp_set_sensor_mipi_to_isp(
 			return -EINVAL;
 		input_format = fc->atomisp_in_fmt;
 		bayer_order = fc->bayer_order;
+		if (input->sensor_isp)
+			dev_dbg(isp->dev,
+				"sensor_isp: CSS input from sink pad code 0x%04x → fmt=%u bayer=%u\n",
+				sink->code, input_format, bayer_order);
 	}
 
 	atomisp_css_input_set_format(asd, stream_id, input_format);

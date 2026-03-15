@@ -15,7 +15,6 @@
 #include <linux/errno.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
-#include <linux/jiffies.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -2061,6 +2060,10 @@ static int mt9m114_ifp_set_selection(struct v4l2_subdev *sd,
 static void mt9m114_ifp_unregistered(struct v4l2_subdev *sd)
 {
 	struct mt9m114 *sensor = ifp_to_mt9m114(sd);
+	struct device *dev = &sensor->client->dev;
+
+	dev_dbg(dev, "ifp unregistered callback (ifp.v4l2_dev=%p, pa.v4l2_dev=%p)\n",
+		sensor->ifp.sd.v4l2_dev, sensor->pa.sd.v4l2_dev);
 
 	v4l2_device_unregister_subdev(&sensor->pa.sd);
 	complete(&sensor->ifp.unregistered);
@@ -2635,11 +2638,22 @@ static void mt9m114_remove(struct i2c_client *client)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct mt9m114 *sensor = ifp_to_mt9m114(sd);
 	struct device *dev = &client->dev;
+	bool ifp_async_registered = sensor->ifp.sd.async_list.next;
+	bool ifp_bound = sensor->ifp.sd.v4l2_dev;
 
-	reinit_completion(&sensor->ifp.unregistered);
-	v4l2_async_unregister_subdev(&sensor->ifp.sd);
-	if (!wait_for_completion_timeout(&sensor->ifp.unregistered, msecs_to_jiffies(1000)))
-		dev_warn(dev, "timeout waiting for async unregister\n");
+	dev_dbg(dev,
+		"remove start (ifp_bound=%u ifp_async_registered=%u ifp.v4l2_dev=%p pa.v4l2_dev=%p)\n",
+		ifp_bound, ifp_async_registered,
+		sensor->ifp.sd.v4l2_dev, sensor->pa.sd.v4l2_dev);
+
+	if (ifp_async_registered) {
+		reinit_completion(&sensor->ifp.unregistered);
+		v4l2_async_unregister_subdev(&sensor->ifp.sd);
+		if (ifp_bound)
+			wait_for_completion(&sensor->ifp.unregistered);
+	} else {
+		dev_warn(dev, "ifp async subdev already unregistered, skipping\n");
+	}
 
 	mt9m114_ifp_cleanup(sensor);
 	mt9m114_pa_cleanup(sensor);

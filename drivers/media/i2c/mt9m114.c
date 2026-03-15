@@ -10,10 +10,12 @@
  */
 
 #include <linux/clk.h>
+#include <linux/completion.h>
 #include <linux/delay.h>
 #include <linux/errno.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
+#include <linux/jiffies.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -416,6 +418,7 @@ struct mt9m114 {
 		unsigned int frame_rate;
 
 		struct v4l2_ctrl *tpg[4];
+		struct completion unregistered;
 	} ifp;
 };
 
@@ -1467,6 +1470,8 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 
 	sd->ctrl_handler = hdl;
 
+	init_completion(&sensor->ifp.unregistered);
+
 	return 0;
 
 error:
@@ -2058,6 +2063,7 @@ static void mt9m114_ifp_unregistered(struct v4l2_subdev *sd)
 	struct mt9m114 *sensor = ifp_to_mt9m114(sd);
 
 	v4l2_device_unregister_subdev(&sensor->pa.sd);
+	complete(&sensor->ifp.unregistered);
 }
 
 static int mt9m114_ifp_registered(struct v4l2_subdev *sd)
@@ -2630,7 +2636,11 @@ static void mt9m114_remove(struct i2c_client *client)
 	struct mt9m114 *sensor = ifp_to_mt9m114(sd);
 	struct device *dev = &client->dev;
 
+	reinit_completion(&sensor->ifp.unregistered);
 	v4l2_async_unregister_subdev(&sensor->ifp.sd);
+	if (!wait_for_completion_timeout(&sensor->ifp.unregistered,
+				 msecs_to_jiffies(1000)))
+		dev_warn(dev, "timeout waiting for async unregister\n");
 
 	mt9m114_ifp_cleanup(sensor);
 	mt9m114_pa_cleanup(sensor);
@@ -2644,6 +2654,25 @@ static void mt9m114_remove(struct i2c_client *client)
 	if (!pm_runtime_status_suspended(dev))
 		mt9m114_power_off(sensor);
 	pm_runtime_set_suspended(dev);
+}
+
+static void mt9m114_shutdown(struct i2c_client *client)
+{
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct mt9m114 *sensor;
+
+	if (!sd)
+		return;
+
+	sensor = ifp_to_mt9m114(sd);
+
+	if (sensor->streaming)
+		mt9m114_stop_streaming(sensor);
+
+	pm_runtime_disable(&client->dev);
+	if (!pm_runtime_status_suspended(&client->dev))
+		mt9m114_power_off(sensor);
+	pm_runtime_set_suspended(&client->dev);
 }
 
 static const struct of_device_id mt9m114_of_ids[] = {
@@ -2667,6 +2696,7 @@ static struct i2c_driver mt9m114_driver = {
 	},
 	.probe		= mt9m114_probe,
 	.remove		= mt9m114_remove,
+	.shutdown	= mt9m114_shutdown,
 };
 
 module_i2c_driver(mt9m114_driver);

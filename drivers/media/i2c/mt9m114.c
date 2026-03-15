@@ -1230,6 +1230,33 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 		goto error;
 	}
 
+	/*
+	 * Dump key registers after CONFIG_CHANGE so we can verify the sensor
+	 * actually applied the requested output format/size/binning.
+	 */
+	{
+		u64 out_fmt = 0, out_w = 0, out_h = 0, read_mode = 0;
+		u64 cpipe_last = 0, line_len = 0, frame_len = 0;
+
+		cci_read(sensor->regmap, MT9M114_CAM_OUTPUT_FORMAT, &out_fmt, NULL);
+		cci_read(sensor->regmap, MT9M114_CAM_OUTPUT_WIDTH, &out_w, NULL);
+		cci_read(sensor->regmap, MT9M114_CAM_OUTPUT_HEIGHT, &out_h, NULL);
+		cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
+				 &read_mode, NULL);
+		cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CFG_CPIPE_LAST_ROW,
+				 &cpipe_last, NULL);
+		cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CFG_LINE_LENGTH_PCK,
+				 &line_len, NULL);
+		cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
+				 &frame_len, NULL);
+
+		dev_info(&sensor->client->dev,
+			 "mt9m114 POST-CONFIG: out_fmt=0x%04llx out=%llu x %llu "
+			 "read_mode=0x%04llx cpipe_last=%llu line_len=%llu frame_len=%llu\n",
+			 out_fmt, out_w, out_h, read_mode, cpipe_last, line_len,
+			 frame_len);
+	}
+
 	sensor->streaming = true;
 
 	if (mt9m114_smart_metering && sensor->ifp.ae_auto) {

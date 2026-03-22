@@ -85,6 +85,7 @@
 #define MT9M114_AE_TRACK_ALGO				CCI_REG16(0xa804)
 #define MT9M114_AE_TRACK_EXEC_AUTOMATIC_EXPOSURE		BIT(0)
 #define MT9M114_AE_TRACK_AE_TRACKING_DAMPENING_SPEED	CCI_REG8(0xa80a)
+#define MT9M114_AE_RULE_ALGO				CCI_REG16(0xa404)
 
 /* Low-light enhancement registers (from android-ia) */
 #define MT9M114_AE_TRACK_MODE				CCI_REG8(0xa800)
@@ -447,6 +448,14 @@ static const char * const mt9m114_metering_preset_names[] = {
 	NULL,
 };
 
+static const char * const mt9m114_ae_rule_algo_names[] = {
+	"Average Brightness",
+	"Weighted Average",
+	"Adaptive Weighted Highlights",
+	"Adaptive Weighted Lowlights",
+	NULL,
+};
+
 struct mt9m114_format_info {
 	u32 code;
 	u32 output_format;
@@ -481,6 +490,7 @@ struct mt9m114 {
 		struct v4l2_ctrl *vblank;
 		struct v4l2_ctrl *ae_metering_preset;
 		struct v4l2_ctrl *ae_track_speed;
+		struct v4l2_ctrl *ae_rule_algo;
 	} pa;
 
 	/* Image Flow Processor */
@@ -1352,6 +1362,11 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 			  ctrl->val, &ret);
 		break;
 
+	case V4L2_CID_MT9M114_AE_RULE_ALGO:
+		cci_write(sensor->regmap, MT9M114_AE_RULE_ALGO,
+			  ctrl->val, &ret);
+		break;
+
 	case V4L2_CID_EXPOSURE:
 		ret = mt9m114_ensure_manual_ae(sensor);
 		if (ret)
@@ -1703,7 +1718,7 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 		return ret;
 
 	/* Initialize the control handler. */
-	v4l2_ctrl_handler_init(hdl, 9);  /* Increased for 2 new custom controls */
+	v4l2_ctrl_handler_init(hdl, 10); /* Increased for 3 new custom controls */
 
 	/* The range of the HBLANK and VBLANK controls will be updated below. */
 	sensor->pa.hblank = v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops,
@@ -1750,6 +1765,19 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 
 	if (sensor->pa.ae_track_speed)
 		sensor->pa.ae_track_speed->flags |= V4L2_CTRL_FLAG_SLIDER;
+
+	/* Custom control: AE Rule Algorithm (0xA404 register) */
+	static const struct v4l2_ctrl_config ae_rule_algo_cfg = {
+		.ops = &mt9m114_pa_ctrl_ops,
+		.id = V4L2_CID_MT9M114_AE_RULE_ALGO,
+		.type = V4L2_CTRL_TYPE_MENU,
+		.name = "AE Algorithm Mode",
+		.min = 0,
+		.max = ARRAY_SIZE(mt9m114_ae_rule_algo_names) - 2,
+		.def = 0,
+		.qmenu = mt9m114_ae_rule_algo_names,
+	};
+	sensor->pa.ae_rule_algo = v4l2_ctrl_new_custom(hdl, &ae_rule_algo_cfg, NULL);
 
 	/*
 	 * The maximum coarse integration time is the frame length in lines

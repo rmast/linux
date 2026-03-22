@@ -199,6 +199,9 @@ struct atomisp_subdev_params {
 	int  dvs_ver_proj_bytes;
 	int  dvs_hor_proj_bytes;
 
+	u32 frame_duration_us;
+	u32 frame_duration_prev_us;
+
 	/* Flag to check if driver needs to update params to css */
 	bool css_update_params_needed;
 };

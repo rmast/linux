@@ -128,6 +128,12 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	{
+		unsigned int input = 0;
+		if (xioctl(fd, VIDIOC_S_INPUT, &input) < 0)
+			perror("VIDIOC_S_INPUT");
+	}
+
 	if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) ||
 	    !(cap.capabilities & V4L2_CAP_STREAMING)) {
 		fprintf(stderr, "Device does not support capture/streaming\n");
@@ -139,6 +145,22 @@ int main(int argc, char **argv)
 	fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	if (xioctl(fd, VIDIOC_G_FMT, &fmt) < 0) {
 		perror("VIDIOC_G_FMT");
+		close(fd);
+		return 1;
+	}
+
+	if (fmt.fmt.pix.width == 0 || fmt.fmt.pix.height == 0 ||
+	    fmt.fmt.pix.pixelformat == 0 ||
+	    (fmt.fmt.pix.width != 1280 ||
+	     (fmt.fmt.pix.height != 720 && fmt.fmt.pix.height != 960))) {
+		fmt.fmt.pix.width = 1280;
+		fmt.fmt.pix.height = 720;
+		fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUV420;
+		fmt.fmt.pix.field = V4L2_FIELD_NONE;
+	}
+
+	if (xioctl(fd, VIDIOC_S_FMT, &fmt) < 0) {
+		perror("VIDIOC_S_FMT");
 		close(fd);
 		return 1;
 	}

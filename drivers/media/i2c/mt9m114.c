@@ -16,6 +16,7 @@
 #include <linux/errno.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
+#include <linux/jiffies.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -25,6 +26,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/types.h>
 #include <linux/videodev2.h>
+#include <linux/workqueue.h>
 
 #include <media/v4l2-async.h>
 #include <media/v4l2-cci.h>
@@ -56,6 +58,7 @@
 #define MT9M114_ACCESS_CTL_STAT				CCI_REG16(0x0982)
 #define MT9M114_PHYSICAL_ADDRESS_ACCESS			CCI_REG16(0x098a)
 #define MT9M114_LOGICAL_ADDRESS_ACCESS			CCI_REG16(0x098e)
+#define MT9M114_MCU_VARIABLE_DATA0			CCI_REG16(0x0990)
 
 /* Sensor Core registers */
 #define MT9M114_FRAME_LENGTH_LINES				CCI_REG16(0x300a)
@@ -64,6 +67,8 @@
 #define MT9M114_RESET_REGISTER				CCI_REG16(0x301a)
 #define MT9M114_RESET_REGISTER_LOCK_REG				BIT(3)
 #define MT9M114_RESET_REGISTER_MASK_BAD				BIT(9)
+#define MT9M114_SENSOR_READ_MODE			CCI_REG16(0x3040)
+#define MT9M114_SENSOR_READ_MODE_2X2_SUMMING			BIT(10)
 #define MT9M114_FLASH					CCI_REG16(0x3046)
 #define MT9M114_GREEN1_GAIN				CCI_REG16(0x3056)
 #define MT9M114_BLUE_GAIN				CCI_REG16(0x3058)
@@ -361,6 +366,74 @@
 
 #define MT9M114_DEF_FRAME_RATE				30
 #define MT9M114_MAX_FRAME_RATE				120
+#define MT9M114_MIN_FRAME_RATE_FLOOR			2
+
+#define MT9M114_SMART_METER_INTERVAL_MS			500
+#define MT9M114_SMART_METER_HYSTERESIS			(2 * HZ)
+#define MT9M114_SMART_METER_BACKLIT_DELTA		24
+#define MT9M114_SMART_METER_BACKLIT_SCENE_MIN		64
+#define MT9M114_SMART_METER_UNIFORM_DELTA		8
+
+#define MT9M114_DEEP_LOWLIGHT_INTERVAL_MS		500
+
+#define MT9M114_SMART_AE_STATS_AVG_LUMA			CCI_REG8(0x3108)
+#define MT9M114_SMART_AE_STATS_CENTER_LUMA		CCI_REG8(0x310a)
+#define MT9M114_SMART_BLC_CTRL				CCI_REG8(0x3102)
+#define MT9M114_SMART_BLC_ENABLE			BIT(0)
+
+#define MT9M114_DEEP_LOWLIGHT_BINNED_WIDTH		648U
+#define MT9M114_DEEP_LOWLIGHT_BINNED_HEIGHT_720		368U
+#define MT9M114_DEEP_LOWLIGHT_BINNED_HEIGHT_960		488U
+#define MT9M114_DEEP_LOWLIGHT_BINNED_HEIGHT_976		488U
+#define MT9M114_DEEP_LOWLIGHT_OUTPUT_WIDTH		1280U
+#define MT9M114_DEEP_LOWLIGHT_OUTPUT_WIDTH_1288		1288U
+#define MT9M114_DEEP_LOWLIGHT_OUTPUT_WIDTH_1296		1296U
+#define MT9M114_DEEP_LOWLIGHT_OUTPUT_HEIGHT_720		720U
+#define MT9M114_DEEP_LOWLIGHT_OUTPUT_HEIGHT_960		960U
+#define MT9M114_DEEP_LOWLIGHT_OUTPUT_HEIGHT_968		968U
+#define MT9M114_DEEP_LOWLIGHT_OUTPUT_HEIGHT_976		976U
+
+#define MT9M114_DEEP_LOWLIGHT_AP_GAIN_SOFT		0x04
+#define MT9M114_DEEP_LOWLIGHT_AP_THRESH_SOFT		0x10
+#define MT9M114_DEEP_LOWLIGHT_DEMOSAIC_SOFT		0x50
+
+#define MT9M114_DEEP_LOWLIGHT_GAIN_ENTER_PCT		95U
+#define MT9M114_DEEP_LOWLIGHT_GAIN_EXIT_PCT		70U
+#define MT9M114_DEEP_LOWLIGHT_GAIN_EXIT_RESERVE_PCT	50U
+#define MT9M114_DEEP_LOWLIGHT_GAIN_ON_SATURATION_PCT	80U
+#define MT9M114_DEEP_LOWLIGHT_GAIN_OFF_SEED_CAP_PCT	45U
+#define MT9M114_DEEP_LOWLIGHT_STRICT_GAIN_MAX_FALLBACK	256U
+#define MT9M114_DEEP_LOWLIGHT_EXPOSURE_ENTER_PCT	95U
+#define MT9M114_DEEP_LOWLIGHT_EXPOSURE_EXIT_PCT		60U
+#define MT9M114_DEEP_LOWLIGHT_FPS_MIN			2U
+#define MT9M114_DEEP_LOWLIGHT_FPS_MAX			10U
+#define MT9M114_DEEP_LOWLIGHT_FPS_ENTER_SEED		5U
+#define MT9M114_DEEP_LOWLIGHT_FPS_EXIT_RESERVE		10U
+#define MT9M114_DEEP_LOWLIGHT_FPS_EXIT_SEED		10U
+#define MT9M114_DEEP_LOWLIGHT_FPS_EXIT_SEED_DARK	5U
+#define MT9M114_DEEP_LOWLIGHT_OFF_DARK_GAIN_PCT	35U
+#define MT9M114_DEEP_LOWLIGHT_TRANSITION_SCALE		4U
+#define MT9M114_DEEP_LOWLIGHT_TRANSITION_SCALE_OFF	2U
+#define MT9M114_DEEP_LOWLIGHT_SWITCH_HYSTERESIS		(3 * HZ)
+#define MT9M114_DEEP_LOWLIGHT_STRICT_LUMA_ENTER	24U
+#define MT9M114_DEEP_LOWLIGHT_LUMA_EXIT		96U
+#define MT9M114_DEEP_LOWLIGHT_STRICT_LUMA_ZERO_LOW_GAIN_SAMPLES_DEFAULT	4U
+#define MT9M114_DEEP_LOWLIGHT_STALE_LIMIT		8U
+#define MT9M114_DEEP_LOWLIGHT_STRICT_STALE_FORCE_OFF_DEFAULT	8U
+#define MT9M114_DEEP_LOWLIGHT_REENTRY_COOLDOWN		(5 * HZ)
+#define MT9M114_DEEP_LOWLIGHT_FORCE_OFF_REENTRY_COOLDOWN	(HZ)
+#define MT9M114_DEEP_LOWLIGHT_INVALID_EXIT_GUARD	(5 * HZ)
+#define MT9M114_DEEP_LOWLIGHT_INVALID_ENTER_SAMPLES	3U
+#define MT9M114_DEEP_LOWLIGHT_STALE_DUMP_TRIGGER	3U
+#define MT9M114_DEEP_LOWLIGHT_ON_SATURATION_SAMPLES	3U
+#define MT9M114_DEEP_LOWLIGHT_PENDING_ZERO_STATS_DUMP_TRIGGER	3U
+#define MT9M114_DEEP_LOWLIGHT_PENDING_ZERO_STATS_LOW_GAIN_PCT	55U
+#define MT9M114_DEEP_LOWLIGHT_PENDING_ZERO_STATS_ENTER_SAMPLES	10U
+#define MT9M114_DEEP_LOWLIGHT_ON_ZERO_STATS_TIMEOUT_SAMPLES	12U
+#define MT9M114_DEEP_LOWLIGHT_STALE_HARD_FORCE_OFF_MULTIPLIER	2U
+
+#define MT9M114_IFP_OUTPUT_FMT_311C			CCI_REG16(0x311c)
+#define MT9M114_IFP_OUTPUT_FMT_311E			CCI_REG16(0x311e)
 
 #define MT9M114_DEF_PIXCLOCK				48000000
 
@@ -456,6 +529,50 @@ static const char * const mt9m114_ae_rule_algo_names[] = {
 	NULL,
 };
 
+static bool mt9m114_smart_metering = true;
+module_param_named(smart_metering, mt9m114_smart_metering, bool, 0644);
+MODULE_PARM_DESC(smart_metering,
+		 "Enable contrast-aware AE metering switching during streaming");
+
+static bool mt9m114_smart_metering_lock_uniform_strict = true;
+module_param_named(smart_metering_lock_uniform_strict,
+		   mt9m114_smart_metering_lock_uniform_strict, bool, 0644);
+MODULE_PARM_DESC(smart_metering_lock_uniform_strict,
+		 "In strict-YUV mode, force smart metering candidate to Uniform for AE stability diagnostics");
+
+static bool mt9m114_smart_metering_blc;
+module_param_named(smart_metering_blc, mt9m114_smart_metering_blc, bool, 0644);
+MODULE_PARM_DESC(smart_metering_blc,
+		 "Enable backlight compensation bit toggling at register 0x3102");
+
+static bool mt9m114_deep_lowlight = true;
+module_param_named(deep_lowlight, mt9m114_deep_lowlight, bool, 0644);
+MODULE_PARM_DESC(deep_lowlight,
+		 "Enable transparent 2x2 summing deep low-light mode for 1280x720/960 and 1296x976 YUV output");
+
+static bool mt9m114_deep_lowlight_runtime = true;
+static bool mt9m114_deep_lowlight_test_once;
+static bool mt9m114_deep_lowlight_force_ifp_yuv;
+static bool mt9m114_deep_lowlight_strict_ifp_yuv = true;
+static bool mt9m114_deep_lowlight_strict_runtime = true;
+static bool mt9m114_deep_lowlight_strict_allow_regular_enter = true;
+static unsigned int mt9m114_deep_lowlight_strict_stale_force_off =
+	MT9M114_DEEP_LOWLIGHT_STRICT_STALE_FORCE_OFF_DEFAULT;
+static bool mt9m114_deep_lowlight_strict_luma_zero_low_gain_exit = true;
+static unsigned int mt9m114_deep_lowlight_strict_luma_zero_low_gain_samples =
+	MT9M114_DEEP_LOWLIGHT_STRICT_LUMA_ZERO_LOW_GAIN_SAMPLES_DEFAULT;
+static bool mt9m114_deep_lowlight_allow_raw_switch;
+static bool mt9m114_deep_lowlight_dump_stats_on_stale;
+module_param_named(deep_lowlight_dump_stats_on_stale,
+		   mt9m114_deep_lowlight_dump_stats_on_stale, bool, 0644);
+MODULE_PARM_DESC(deep_lowlight_dump_stats_on_stale,
+		 "DIAGNOSTIC: dump read-only AE/BLC logical stats once per sustained stale/luma-zero episode");
+
+static bool mt9m114_stop_fast_no_state;
+module_param_named(stop_fast_no_state, mt9m114_stop_fast_no_state, bool, 0644);
+MODULE_PARM_DESC(stop_fast_no_state,
+		 "DIAGNOSTIC: skip explicit sensor stop state transition (STANDBY/SUSPEND) to isolate stop-stream timeout source");
+
 struct mt9m114_format_info {
 	u32 code;
 	u32 output_format;
@@ -476,6 +593,7 @@ struct mt9m114 {
 
 	unsigned int pixrate;
 	bool streaming;
+	bool deep_lowlight_summing;
 	u32 pad_slew_rate;
 
 	/* Pixel Array */
@@ -491,6 +609,8 @@ struct mt9m114 {
 		struct v4l2_ctrl *ae_metering_preset;
 		struct v4l2_ctrl *ae_track_speed;
 		struct v4l2_ctrl *ae_rule_algo;
+		u32 active_width;
+		u32 active_height;
 	} pa;
 
 	/* Image Flow Processor */
@@ -500,6 +620,34 @@ struct mt9m114 {
 
 		struct v4l2_ctrl_handler hdl;
 		unsigned int frame_rate;
+		bool ae_auto;
+		struct delayed_work smart_meter_work;
+		struct delayed_work deep_lowlight_work;
+		unsigned long deep_lowlight_last_switch;
+		unsigned long deep_lowlight_reentry_block_until;
+		unsigned long deep_lowlight_invalid_exit_guard_until;
+		unsigned int deep_lowlight_gain_max;
+		unsigned int deep_lowlight_last_exposure;
+		unsigned int deep_lowlight_last_gain;
+		unsigned int deep_lowlight_transition_exposure;
+		unsigned int deep_lowlight_transition_gain;
+		bool deep_lowlight_transition_valid;
+		u8 deep_lowlight_last_luma;
+		u8 deep_lowlight_stale_count;
+		u8 deep_lowlight_stale_recover_count;
+		u8 deep_lowlight_luma_zero_low_gain_count;
+		u8 deep_lowlight_on_saturation_count;
+		u8 deep_lowlight_on_zero_stats_count;
+		u8 deep_lowlight_invalid_enter_count;
+		u8 deep_lowlight_pending_zero_stats_count;
+		bool deep_lowlight_stale_dumped;
+		bool deep_lowlight_faulted;
+		bool set_fmt_trace_sink_logged;
+		bool set_fmt_trace_src_logged;
+		unsigned int smart_metering_active_preset;
+		unsigned long smart_metering_last_switch;
+		u8 smart_last_scene_avg;
+		u8 smart_last_center_avg;
 
 		struct v4l2_ctrl *tpg[4];
 		struct completion unregistered;
@@ -572,6 +720,29 @@ mt9m114_default_format_info(struct mt9m114 *sensor)
 		return &mt9m114_format_infos[1];
 	else
 		return &mt9m114_format_infos[0];
+}
+
+static u32 mt9m114_default_ifp_src_code(struct mt9m114 *sensor)
+{
+	return mt9m114_default_format_info(sensor)->code;
+}
+
+static bool mt9m114_ifp_yuv_test_active(struct mt9m114 *sensor)
+{
+	if (mt9m114_deep_lowlight_strict_ifp_yuv)
+		return true;
+
+	if (!mt9m114_deep_lowlight_force_ifp_yuv)
+		return false;
+
+	/*
+	 * On this AtomISP CSI-2 path, forcing sensor-side YUV output can stall
+	 * streaming. Keep the knob for non-CSI2 users, but ignore on CSI-2.
+	 */
+	if (sensor->bus_cfg.bus_type == V4L2_MBUS_CSI2_DPHY)
+		return false;
+
+	return true;
 }
 
 static const struct mt9m114_format_info *
@@ -1025,17 +1196,105 @@ static int mt9m114_configure_ifp(struct mt9m114 *sensor,
 	return ret;
 }
 
-static int mt9m114_set_frame_rate(struct mt9m114 *sensor)
+static unsigned int mt9m114_get_min_fps(struct mt9m114 *sensor);
+static void mt9m114_update_vblank_range_for_min_fps(struct mt9m114 *sensor,
+						   struct v4l2_subdev_state *state,
+						   unsigned int min_fps);
+
+static int mt9m114_set_frame_rate_with_state(struct mt9m114 *sensor,
+					     struct v4l2_subdev_state *pa_state)
 {
-	u16 frame_rate = sensor->ifp.frame_rate << 8;
+	unsigned int max_fps = sensor->ifp.frame_rate;
+	unsigned int min_fps = sensor->ifp.ae_auto ? MT9M114_MIN_FRAME_RATE_FLOOR
+						 : max_fps;
+	u16 min_rate;
+	u16 max_rate;
 	int ret = 0;
 
+	if (min_fps > max_fps)
+		min_fps = max_fps;
+
+	min_rate = min_fps << 8;
+	max_rate = max_fps << 8;
+
 	cci_write(sensor->regmap, MT9M114_CAM_AET_MIN_FRAME_RATE,
-		  frame_rate, &ret);
+		  min_rate, &ret);
 	cci_write(sensor->regmap, MT9M114_CAM_AET_MAX_FRAME_RATE,
-		  frame_rate, &ret);
+		  max_rate, &ret);
+
+	mt9m114_update_vblank_range_for_min_fps(sensor, pa_state, min_fps);
 
 	return ret;
+}
+
+static int mt9m114_set_frame_rate(struct mt9m114 *sensor)
+{
+	return mt9m114_set_frame_rate_with_state(sensor, NULL);
+}
+
+static unsigned int mt9m114_get_min_fps(struct mt9m114 *sensor)
+{
+	if (!sensor->ifp.ae_auto)
+		return sensor->ifp.frame_rate;
+
+	return min_t(unsigned int, MT9M114_MIN_FRAME_RATE_FLOOR,
+		     sensor->ifp.frame_rate);
+}
+
+static void mt9m114_update_vblank_range_for_min_fps(struct mt9m114 *sensor,
+						   struct v4l2_subdev_state *state,
+						   unsigned int min_fps)
+{
+	struct v4l2_subdev_state *active_state = state;
+	const struct v4l2_mbus_framefmt *format;
+	unsigned int line_length;
+	u32 max_vblank;
+	u64 frame_length;
+	u32 default_vblank;
+	bool locked = false;
+
+	if (!sensor->pa.vblank || !sensor->pa.hblank)
+		return;
+
+	if (!min_fps)
+		return;
+
+	if (!active_state)
+		active_state = v4l2_subdev_get_locked_active_state(&sensor->pa.sd);
+
+	if (!active_state) {
+		active_state = v4l2_subdev_lock_and_get_active_state(&sensor->pa.sd);
+		locked = true;
+	}
+
+	format = v4l2_subdev_state_get_format(active_state, 0);
+
+	line_length = format->width + sensor->pa.hblank->val;
+	if (!line_length) {
+		if (locked)
+			v4l2_subdev_unlock_state(active_state);
+		return;
+	}
+
+	frame_length = div_u64((u64)sensor->pixrate,
+			       (u64)line_length * min_fps);
+	if (frame_length < format->height + MT9M114_MIN_VBLANK)
+		frame_length = format->height + MT9M114_MIN_VBLANK;
+	if (frame_length > MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX)
+		frame_length = MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX;
+
+	max_vblank = frame_length - format->height;
+	default_vblank = clamp_t(u32, sensor->pa.vblank->val,
+				 MT9M114_MIN_VBLANK, max_vblank);
+
+	dev_dbg(&sensor->client->dev,
+		"vblank range update: min_fps=%u line_len=%u frame_len=%llu max_vblank=%u default_vblank=%u\n",
+		min_fps, line_length, frame_length, max_vblank, default_vblank);
+	__v4l2_ctrl_modify_range(sensor->pa.vblank, MT9M114_MIN_VBLANK,
+				 max_vblank, 1, default_vblank);
+
+	if (locked)
+		v4l2_subdev_unlock_state(active_state);
 }
 
 static int mt9m114_start_streaming(struct mt9m114 *sensor,
@@ -1045,42 +1304,158 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 	int ret;
 
 	ret = pm_runtime_resume_and_get(&sensor->client->dev);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: pm_runtime_resume_and_get failed: %d\n",
+			ret);
 		return ret;
+	}
 
 	ret = mt9m114_initialize(sensor);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: initialize failed: %d\n", ret);
 		goto error;
+	}
+
+	if (mt9m114_ifp_yuv_test_active(sensor))
+		dev_info_once(&sensor->client->dev,
+			      mt9m114_deep_lowlight_strict_ifp_yuv ?
+			      "deep-lowlight: STRICT YUV bring-up mode active\n" :
+			      "deep-lowlight: forcing sensor IFP UYVY output for test mode\n");
+	else if (mt9m114_deep_lowlight_force_ifp_yuv &&
+		 sensor->bus_cfg.bus_type == V4L2_MBUS_CSI2_DPHY)
+		dev_warn_once(&sensor->client->dev,
+		      "deep-lowlight: force_ifp_yuv ignored on CSI-2 (known stream timeout path); using negotiated format\n");
 
 	ret = mt9m114_configure_ifp(sensor, ifp_state);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: configure_ifp failed: %d\n", ret);
 		goto error;
+	}
 
 	ret = mt9m114_configure_pa(sensor, pa_state);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: configure_pa failed: %d\n", ret);
 		goto error;
+	}
 
-	ret = mt9m114_set_frame_rate(sensor);
-	if (ret)
+	ret = mt9m114_set_frame_rate_with_state(sensor, pa_state);
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: set_frame_rate failed: %d\n", ret);
 		goto error;
+	}
 
 	ret = __v4l2_ctrl_handler_setup(&sensor->pa.hdl);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: pa ctrl setup failed: %d\n", ret);
 		goto error;
+	}
 
 	ret = __v4l2_ctrl_handler_setup(&sensor->ifp.hdl);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: ifp ctrl setup failed: %d\n", ret);
 		goto error;
+	}
 
 	/*
 	 * The Change-Config state is transient and moves to the streaming
 	 * state automatically.
 	 */
 	ret = mt9m114_set_state(sensor, MT9M114_SYS_STATE_ENTER_CONFIG_CHANGE);
-	if (ret)
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: set_state ENTER_CONFIG_CHANGE failed: %d\n",
+			ret);
 		goto error;
+	}
+	/* Wait for the state transition to complete. */
+	ret = mt9m114_poll_state(sensor, MT9M114_SYS_STATE_STREAMING);
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"start_stream: wait for STREAMING state failed: %d\n", ret);
+		goto error;
+	}
+	{
+			const struct v4l2_mbus_framefmt *ifp_src_fmt;
+			u64 out_fmt = 0, out_w = 0, out_h = 0, read_mode = 0;
+			u64 cpipe_last = 0, line_len = 0, frame_len = 0;
+
+			ifp_src_fmt = v4l2_subdev_state_get_format(ifp_state, 1);
+			dev_info(&sensor->client->dev,
+				 "mt9m114 FORMAT: ifp_src_code=0x%04x %ux%u force_ifp_yuv=%u\n",
+				 ifp_src_fmt->code, ifp_src_fmt->width,
+				 ifp_src_fmt->height,
+				 mt9m114_ifp_yuv_test_active(sensor) ? 1 : 0);
+
+			cci_read(sensor->regmap, MT9M114_CAM_OUTPUT_FORMAT, &out_fmt, NULL);
+			cci_read(sensor->regmap, MT9M114_CAM_OUTPUT_WIDTH, &out_w, NULL);
+			cci_read(sensor->regmap, MT9M114_CAM_OUTPUT_HEIGHT, &out_h, NULL);
+			cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
+							&read_mode, NULL);
+			cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CFG_CPIPE_LAST_ROW,
+							&cpipe_last, NULL);
+			cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CFG_LINE_LENGTH_PCK,
+							&line_len, NULL);
+			cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
+							&frame_len, NULL);
+
+			dev_info(&sensor->client->dev,
+					"mt9m114 POST-CONFIG: out_fmt=0x%04llx out=%llu x %llu "
+					"read_mode=0x%04llx cpipe_last=%llu line_len=%llu frame_len=%llu\n",
+					out_fmt, out_w, out_h, read_mode, cpipe_last, line_len,
+					frame_len);
+
+			if (mt9m114_deep_lowlight_strict_ifp_yuv &&
+			    (out_fmt & MT9M114_CAM_OUTPUT_FORMAT_FORMAT_MASK) !=
+			    MT9M114_CAM_OUTPUT_FORMAT_FORMAT_YUV) {
+				dev_err(&sensor->client->dev,
+					"strict-yuv: sensor output format mismatch (out_fmt=0x%04llx is not YUV)\n",
+					out_fmt);
+				ret = -EIO;
+				goto error;
+			}
+	}
 
 	sensor->streaming = true;
+	sensor->deep_lowlight_summing = false;
+	sensor->ifp.deep_lowlight_last_switch = 0;
+	sensor->ifp.deep_lowlight_reentry_block_until = 0;
+	sensor->ifp.deep_lowlight_invalid_exit_guard_until = 0;
+	sensor->ifp.deep_lowlight_gain_max = 0;
+	sensor->ifp.deep_lowlight_last_exposure = 0;
+	sensor->ifp.deep_lowlight_last_gain = 0;
+	sensor->ifp.deep_lowlight_transition_exposure = 0;
+	sensor->ifp.deep_lowlight_transition_gain = 0;
+	sensor->ifp.deep_lowlight_transition_valid = false;
+	sensor->ifp.deep_lowlight_last_luma = 0;
+	sensor->ifp.deep_lowlight_stale_count = 0;
+	sensor->ifp.deep_lowlight_stale_recover_count = 0;
+	sensor->ifp.deep_lowlight_luma_zero_low_gain_count = 0;
+	sensor->ifp.deep_lowlight_on_saturation_count = 0;
+	sensor->ifp.deep_lowlight_on_zero_stats_count = 0;
+	sensor->ifp.deep_lowlight_invalid_enter_count = 0;
+	sensor->ifp.deep_lowlight_pending_zero_stats_count = 0;
+	sensor->ifp.deep_lowlight_stale_dumped = false;
+	sensor->ifp.deep_lowlight_faulted = false;
+	schedule_delayed_work(&sensor->ifp.deep_lowlight_work,
+			      msecs_to_jiffies(MT9M114_DEEP_LOWLIGHT_INTERVAL_MS));
+
+	
+	if (mt9m114_smart_metering && sensor->ifp.ae_auto) {
+		sensor->ifp.smart_metering_last_switch = 0;
+		sensor->ifp.smart_metering_active_preset =
+			sensor->pa.ae_metering_preset ?
+			sensor->pa.ae_metering_preset->val :
+			MT9M114_METERING_PRESET_CENTER;
+		schedule_delayed_work(&sensor->ifp.smart_meter_work,
+				      msecs_to_jiffies(MT9M114_SMART_METER_INTERVAL_MS));
+	}
 
 	return 0;
 
@@ -1092,11 +1467,82 @@ error:
 
 static int mt9m114_stop_streaming(struct mt9m114 *sensor)
 {
-	int ret;
+	u64 read_mode_u64;
+	u16 read_mode;
+	int ret = 0;
+	int lowlight_ret = 0;
+	int suspend_ret;
+
+	cancel_delayed_work_sync(&sensor->ifp.smart_meter_work);
+	cancel_delayed_work_sync(&sensor->ifp.deep_lowlight_work);
+
+	if (sensor->deep_lowlight_summing) {
+		lowlight_ret = cci_read(sensor->regmap,
+				       MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
+				       &read_mode_u64, NULL);
+		if (!lowlight_ret) {
+			read_mode = read_mode_u64;
+			read_mode &= ~(MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_MASK |
+				       MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_MASK);
+
+			lowlight_ret = 0;
+			cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
+				  read_mode, &lowlight_ret);
+		}
+
+		if (!lowlight_ret) {
+			lowlight_ret = mt9m114_set_state(sensor,
+						 MT9M114_SYS_STATE_ENTER_CONFIG_CHANGE);
+			if (!lowlight_ret)
+				lowlight_ret = mt9m114_poll_state(sensor,
+							 MT9M114_SYS_STATE_STREAMING);
+		}
+
+		if (lowlight_ret)
+			dev_warn(&sensor->client->dev,
+				 "stop_stream: failed to restore non-summing mode before suspend: %d\n",
+				 lowlight_ret);
+	}
 
 	sensor->streaming = false;
+	sensor->deep_lowlight_summing = false;
+	sensor->ifp.deep_lowlight_last_switch = 0;
+	sensor->ifp.deep_lowlight_reentry_block_until = 0;
+	sensor->ifp.deep_lowlight_invalid_exit_guard_until = 0;
+	sensor->ifp.deep_lowlight_gain_max = 0;
+	sensor->ifp.deep_lowlight_last_exposure = 0;
+	sensor->ifp.deep_lowlight_last_gain = 0;
+	sensor->ifp.deep_lowlight_transition_exposure = 0;
+	sensor->ifp.deep_lowlight_transition_gain = 0;
+	sensor->ifp.deep_lowlight_transition_valid = false;
+	sensor->ifp.deep_lowlight_last_luma = 0;
+	sensor->ifp.deep_lowlight_stale_count = 0;
+	sensor->ifp.deep_lowlight_stale_recover_count = 0;
+	sensor->ifp.deep_lowlight_luma_zero_low_gain_count = 0;
+	sensor->ifp.deep_lowlight_on_saturation_count = 0;
+	sensor->ifp.deep_lowlight_on_zero_stats_count = 0;
+	sensor->ifp.deep_lowlight_invalid_enter_count = 0;
+	sensor->ifp.deep_lowlight_pending_zero_stats_count = 0;
+	sensor->ifp.deep_lowlight_stale_dumped = false;
+	sensor->ifp.deep_lowlight_faulted = false;
 
-	ret = mt9m114_set_state(sensor, MT9M114_SYS_STATE_ENTER_SUSPEND);
+	if (mt9m114_stop_fast_no_state) {
+		dev_info_once(&sensor->client->dev,
+			      "stop-fast-no-state: skipping explicit sensor stop state transition\n");
+		pm_runtime_put_autosuspend(&sensor->client->dev);
+		return 0;
+	}
+
+	suspend_ret = mt9m114_set_state(sensor, MT9M114_SYS_STATE_ENTER_STANDBY);
+	if (suspend_ret) {
+		dev_warn(&sensor->client->dev,
+			 "stop_stream: ENTER_STANDBY failed (%d), trying ENTER_SUSPEND\n",
+			 suspend_ret);
+		suspend_ret = mt9m114_set_state(sensor,
+					       MT9M114_SYS_STATE_ENTER_SUSPEND);
+	}
+	if (suspend_ret)
+		ret = suspend_ret;
 
 	pm_runtime_put_autosuspend(&sensor->client->dev);
 
@@ -1259,6 +1705,1274 @@ static int mt9m114_apply_metering_preset(struct mt9m114 *sensor, unsigned int pr
 	return 0;
 }
 
+static unsigned int mt9m114_smart_metering_candidate(u8 scene_avg, u8 center_avg)
+{
+	unsigned int delta = abs((int)scene_avg - (int)center_avg);
+
+	if (scene_avg >= MT9M114_SMART_METER_BACKLIT_SCENE_MIN &&
+	    center_avg + MT9M114_SMART_METER_BACKLIT_DELTA < scene_avg)
+		return MT9M114_METERING_PRESET_BACKLIT;
+
+	if (delta <= MT9M114_SMART_METER_UNIFORM_DELTA)
+		return MT9M114_METERING_PRESET_UNIFORM;
+
+	return MT9M114_METERING_PRESET_CENTER;
+}
+
+static void mt9m114_smart_metering_set_blc(struct mt9m114 *sensor, bool enable)
+{
+	int ret;
+
+	if (!mt9m114_smart_metering_blc)
+		return;
+
+	ret = cci_update_bits(sensor->regmap, MT9M114_SMART_BLC_CTRL,
+			      MT9M114_SMART_BLC_ENABLE,
+			      enable ? MT9M114_SMART_BLC_ENABLE : 0, NULL);
+	if (ret)
+		dev_dbg(&sensor->client->dev,
+			"smart-meter: BLC update failed (%d)\n", ret);
+}
+
+static void mt9m114_smart_metering_work(struct work_struct *work)
+{
+	struct mt9m114 *sensor = container_of(to_delayed_work(work),
+					      struct mt9m114,
+					      ifp.smart_meter_work);
+	u64 scene_u64;
+	u64 center_u64;
+	unsigned int candidate;
+	u8 scene_avg;
+	u8 center_avg;
+	int ret;
+
+	if (!sensor->streaming || !sensor->ifp.ae_auto || !mt9m114_smart_metering)
+		return;
+
+	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
+		goto reschedule;
+
+	ret = cci_read(sensor->regmap, MT9M114_SMART_AE_STATS_AVG_LUMA,
+		       &scene_u64, NULL);
+	if (ret)
+		goto out_pm;
+
+	ret = cci_read(sensor->regmap, MT9M114_SMART_AE_STATS_CENTER_LUMA,
+		       &center_u64, NULL);
+	if (ret)
+		goto out_pm;
+
+	scene_avg = scene_u64;
+	center_avg = center_u64;
+	sensor->ifp.smart_last_scene_avg = scene_avg;
+	sensor->ifp.smart_last_center_avg = center_avg;
+
+	candidate = mt9m114_smart_metering_candidate(scene_avg, center_avg);
+	if (mt9m114_deep_lowlight_strict_ifp_yuv &&
+	    mt9m114_smart_metering_lock_uniform_strict)
+		candidate = MT9M114_METERING_PRESET_UNIFORM;
+	if (candidate != sensor->ifp.smart_metering_active_preset &&
+	    (sensor->ifp.smart_metering_last_switch == 0 ||
+	     time_after_eq(jiffies,
+			   sensor->ifp.smart_metering_last_switch +
+			   MT9M114_SMART_METER_HYSTERESIS))) {
+		ret = mt9m114_apply_metering_preset(sensor, candidate);
+		if (!ret) {
+			sensor->ifp.smart_metering_active_preset = candidate;
+			sensor->ifp.smart_metering_last_switch = jiffies;
+
+			if (sensor->pa.ae_metering_preset) {
+				sensor->pa.ae_metering_preset->val = candidate;
+				sensor->pa.ae_metering_preset->cur.val = candidate;
+			}
+
+			dev_dbg(&sensor->client->dev,
+				"smart-meter: preset=%u scene=%u center=%u\n",
+				candidate, scene_avg, center_avg);
+		}
+	}
+
+	mt9m114_smart_metering_set_blc(sensor,
+				       candidate == MT9M114_METERING_PRESET_BACKLIT);
+
+out_pm:
+	pm_runtime_put_autosuspend(&sensor->client->dev);
+
+reschedule:
+	if (sensor->streaming && sensor->ifp.ae_auto && mt9m114_smart_metering)
+		schedule_delayed_work(&sensor->ifp.smart_meter_work,
+				      msecs_to_jiffies(MT9M114_SMART_METER_INTERVAL_MS));
+}
+
+static unsigned int mt9m114_gain_threshold(unsigned int min,
+					  unsigned int max,
+					  unsigned int percent);
+static int mt9m114_set_deep_lowlight_mode(struct mt9m114 *sensor, bool enable);
+static int mt9m114_rekick_auto_exposure(struct mt9m114 *sensor);
+static int mt9m114_calc_timing_for_fps(struct mt9m114 *sensor,
+				      unsigned int fps,
+				      u32 *frame_length,
+				      u32 *exposure,
+				      u32 *frame_height);
+static int mt9m114_seed_exposure_for_fps(struct mt9m114 *sensor,
+					 unsigned int fps);
+static int mt9m114_seed_transition_controls(struct mt9m114 *sensor,
+					 bool enable);
+static int mt9m114_set_ae_fps_window(struct mt9m114 *sensor,
+				    unsigned int min_fps,
+				    unsigned int max_fps);
+static int mt9m114_dump_stats(struct mt9m114 *sensor);
+
+static void mt9m114_maybe_switch_deep_lowlight_values(struct mt9m114 *sensor,
+					      unsigned int exposure,
+					      unsigned int gain,
+					      bool have_luma,
+					      unsigned int luma,
+					      bool have_center,
+					      unsigned int center_luma)
+{
+	unsigned int enter_gain;
+	unsigned int exit_gain;
+	unsigned int gain_min;
+	unsigned int gain_max;
+	unsigned int exposure_max;
+	unsigned int exposure_enter;
+	unsigned int exposure_exit;
+	unsigned int exit_gain_reserve;
+	unsigned int on_saturation_gain;
+	unsigned int exposure_exit_reserve = 0;
+	u64 gain_max_hw;
+	u64 frame_length_u64;
+	bool use_reserve_exit;
+	bool reserve_exit_valid;
+	bool can_switch;
+	bool want_enter;
+	bool want_exit;
+	bool want_exit_exposure_gain;
+	bool want_exit_luma;
+	bool strict_luma_zero_low_gain_exit;
+	bool on_saturation_exit;
+	bool on_zero_stats_timeout_exit;
+	bool strict_low_luma_enter;
+	bool reentry_blocked;
+	bool exposure_invalid;
+	bool strict_invalid_enter;
+	bool strict_pending_zero_stats_enter;
+	bool strict_regular_enter_suppressed;
+	const char *pending_reason;
+	const char *on_reason;
+	int ret;
+
+	if (!mt9m114_deep_lowlight || !sensor->streaming || !sensor->pa.gain ||
+	    !sensor->pa.exposure)
+		return;
+
+	if (!mt9m114_deep_lowlight_runtime && !mt9m114_deep_lowlight_test_once)
+		return;
+
+	if (mt9m114_deep_lowlight_strict_ifp_yuv &&
+	    !mt9m114_deep_lowlight_strict_runtime) {
+		dev_info_once(&sensor->client->dev,
+			      "deep-lowlight strict-yuv: runtime switching disabled (set deep_lowlight_strict_runtime=1 to enable)\n");
+		return;
+	}
+
+	if (sensor->ifp.deep_lowlight_faulted)
+		return;
+
+	if (sensor->deep_lowlight_summing && mt9m114_deep_lowlight_test_once)
+		return;
+
+	exposure_max = sensor->pa.exposure->maximum;
+	ret = cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
+		       &frame_length_u64, NULL);
+	if (!ret && frame_length_u64 > 2) {
+		u64 hw_exposure_max = min_t(u64, frame_length_u64 - 2, UINT_MAX);
+
+		exposure_max = max_t(unsigned int, exposure_max,
+				     (unsigned int)hw_exposure_max);
+	}
+	gain_min = sensor->pa.gain->minimum;
+	gain_max = sensor->ifp.deep_lowlight_gain_max ?
+		sensor->ifp.deep_lowlight_gain_max : sensor->pa.gain->maximum;
+
+	if (!sensor->ifp.deep_lowlight_gain_max) {
+		ret = cci_read(sensor->regmap, MT9M114_CAM_AET_AE_MAX_VIRT_AGAIN,
+			       &gain_max_hw, NULL);
+		if (!ret && gain_max_hw > 0 && gain_max_hw < gain_max) {
+			gain_max = (unsigned int)gain_max_hw;
+			sensor->ifp.deep_lowlight_gain_max = gain_max;
+			dev_info_once(&sensor->client->dev,
+				      "deep-lowlight: using AE gain max %u (ctrl max %u)\n",
+				      gain_max, (unsigned int)sensor->pa.gain->maximum);
+		}
+	}
+
+	if (mt9m114_deep_lowlight_strict_ifp_yuv &&
+	    gain_max > MT9M114_DEEP_LOWLIGHT_STRICT_GAIN_MAX_FALLBACK) {
+		gain_max = MT9M114_DEEP_LOWLIGHT_STRICT_GAIN_MAX_FALLBACK;
+		dev_info_once(&sensor->client->dev,
+			      "deep-lowlight strict-yuv: capping gain max for thresholds to %u\n",
+			      gain_max);
+	}
+
+	enter_gain = mt9m114_gain_threshold(gain_min, gain_max,
+				    MT9M114_DEEP_LOWLIGHT_GAIN_ENTER_PCT);
+	exit_gain = mt9m114_gain_threshold(gain_min, gain_max,
+				   MT9M114_DEEP_LOWLIGHT_GAIN_EXIT_PCT);
+	exit_gain_reserve = mt9m114_gain_threshold(gain_min, gain_max,
+					   MT9M114_DEEP_LOWLIGHT_GAIN_EXIT_RESERVE_PCT);
+	on_saturation_gain = mt9m114_gain_threshold(gain_min, gain_max,
+					   MT9M114_DEEP_LOWLIGHT_GAIN_ON_SATURATION_PCT);
+	exposure_exit = div_u64((u64)exposure_max *
+			      MT9M114_DEEP_LOWLIGHT_EXPOSURE_EXIT_PCT, 100);
+	exposure_enter = div_u64((u64)exposure_max *
+			       MT9M114_DEEP_LOWLIGHT_EXPOSURE_ENTER_PCT, 100);
+	use_reserve_exit = sensor->deep_lowlight_summing &&
+		mt9m114_ifp_yuv_test_active(sensor);
+	reserve_exit_valid = false;
+	if (use_reserve_exit &&
+	    !mt9m114_calc_timing_for_fps(sensor,
+					 MT9M114_DEEP_LOWLIGHT_FPS_EXIT_RESERVE,
+					 NULL,
+					 &exposure_exit_reserve,
+					 NULL)) {
+		exposure_exit = exposure_exit_reserve;
+		reserve_exit_valid = true;
+	}
+
+	if (exposure > exposure_max)
+		exposure = exposure_max;
+	if (gain > gain_max)
+		gain = gain_max;
+
+	exposure_invalid = exposure <= 2;
+
+	can_switch = !sensor->ifp.deep_lowlight_last_switch ||
+		time_after_eq(jiffies,
+			      sensor->ifp.deep_lowlight_last_switch +
+			      MT9M114_DEEP_LOWLIGHT_SWITCH_HYSTERESIS);
+
+	strict_low_luma_enter = !sensor->deep_lowlight_summing &&
+		mt9m114_deep_lowlight_strict_ifp_yuv &&
+		have_luma && luma > 0 &&
+		luma <= MT9M114_DEEP_LOWLIGHT_STRICT_LUMA_ENTER &&
+		gain >= exit_gain_reserve &&
+		exposure >= exposure_enter;
+
+	want_enter = (gain >= enter_gain &&
+		      (exposure >= exposure_enter ||
+		       (mt9m114_deep_lowlight_strict_ifp_yuv && exposure_invalid))) ||
+		strict_low_luma_enter;
+
+	if (!sensor->deep_lowlight_summing &&
+	    mt9m114_deep_lowlight_strict_ifp_yuv) {
+		if (exposure_invalid && gain >= enter_gain) {
+			if (sensor->ifp.deep_lowlight_invalid_enter_count < 255)
+				sensor->ifp.deep_lowlight_invalid_enter_count++;
+		} else {
+			sensor->ifp.deep_lowlight_invalid_enter_count = 0;
+		}
+	}
+
+	strict_invalid_enter = mt9m114_deep_lowlight_strict_ifp_yuv &&
+		exposure_invalid && gain >= enter_gain && exposure < exposure_max &&
+		sensor->ifp.deep_lowlight_invalid_enter_count >=
+		MT9M114_DEEP_LOWLIGHT_INVALID_ENTER_SAMPLES;
+
+	if (!sensor->deep_lowlight_summing &&
+	    mt9m114_deep_lowlight_strict_ifp_yuv &&
+	    have_luma && have_center &&
+	    luma == 0 && center_luma == 0 &&
+	    exposure >= exposure_enter) {
+		if (sensor->ifp.deep_lowlight_pending_zero_stats_count < 255)
+			sensor->ifp.deep_lowlight_pending_zero_stats_count++;
+	} else {
+		sensor->ifp.deep_lowlight_pending_zero_stats_count = 0;
+		sensor->ifp.deep_lowlight_stale_dumped = false;
+	}
+
+	if (!sensor->deep_lowlight_summing &&
+	    mt9m114_deep_lowlight_dump_stats_on_stale &&
+	    !sensor->ifp.deep_lowlight_stale_dumped &&
+	    have_luma && have_center && luma == 0 && center_luma == 0 &&
+	    exposure >= exposure_enter &&
+	    gain <= mt9m114_gain_threshold(gain_min, gain_max,
+				   MT9M114_DEEP_LOWLIGHT_PENDING_ZERO_STATS_LOW_GAIN_PCT) &&
+	    sensor->ifp.deep_lowlight_pending_zero_stats_count >=
+	    MT9M114_DEEP_LOWLIGHT_PENDING_ZERO_STATS_DUMP_TRIGGER) {
+		ret = mt9m114_dump_stats(sensor);
+		if (ret)
+			dev_warn_ratelimited(&sensor->client->dev,
+				"deep-lowlight: pending zero-stats diagnostic dump failed: %d\n",
+				ret);
+		else
+			dev_warn_ratelimited(&sensor->client->dev,
+				"deep-lowlight: pending zero-stats with low gain, dumped AE histogram for diagnosis (reason=pending_zero_stats_low_gain)\n");
+		sensor->ifp.deep_lowlight_stale_dumped = true;
+	}
+
+	strict_pending_zero_stats_enter =
+		!sensor->deep_lowlight_summing &&
+		mt9m114_deep_lowlight_strict_ifp_yuv &&
+		sensor->ifp.deep_lowlight_pending_zero_stats_count >=
+		MT9M114_DEEP_LOWLIGHT_PENDING_ZERO_STATS_ENTER_SAMPLES;
+
+	if (strict_pending_zero_stats_enter)
+		want_enter = true;
+
+	strict_regular_enter_suppressed =
+		mt9m114_deep_lowlight_strict_ifp_yuv &&
+		!mt9m114_deep_lowlight_strict_allow_regular_enter &&
+		want_enter && !strict_invalid_enter && !strict_pending_zero_stats_enter;
+	if (strict_regular_enter_suppressed)
+		want_enter = false;
+	want_exit_exposure_gain = exposure <= exposure_exit && gain <= exit_gain;
+	if (reserve_exit_valid)
+		want_exit_exposure_gain = exposure <= exposure_exit_reserve &&
+			gain <= exit_gain_reserve;
+	want_exit_luma = have_luma && luma >= MT9M114_DEEP_LOWLIGHT_LUMA_EXIT;
+	want_exit = want_exit_exposure_gain || want_exit_luma;
+	strict_luma_zero_low_gain_exit = false;
+	on_saturation_exit = false;
+	on_zero_stats_timeout_exit = false;
+	reentry_blocked = sensor->ifp.deep_lowlight_reentry_block_until &&
+		!time_after_eq(jiffies, sensor->ifp.deep_lowlight_reentry_block_until);
+
+	if (!sensor->deep_lowlight_summing && strict_invalid_enter)
+		dev_info_ratelimited(&sensor->client->dev,
+			"deep-lowlight strict-yuv: invalid exposure fallback active (exp=%u/%u gain=%u/%u enter=%u samples=%u)\n",
+			exposure, exposure_max, gain, gain_max, enter_gain,
+			sensor->ifp.deep_lowlight_invalid_enter_count);
+
+	if (strict_pending_zero_stats_enter)
+		dev_warn_ratelimited(&sensor->client->dev,
+			"deep-lowlight strict-yuv: pending timeout with invalid luma/center stats (exp=%u/%u gain=%u/%u zeros=%u/%u), forcing ON entry\n",
+			exposure, exposure_max, gain, gain_max,
+			sensor->ifp.deep_lowlight_pending_zero_stats_count,
+			MT9M114_DEEP_LOWLIGHT_PENDING_ZERO_STATS_ENTER_SAMPLES);
+
+	if (!sensor->deep_lowlight_summing && strict_regular_enter_suppressed)
+		dev_info_ratelimited(&sensor->client->dev,
+			"deep-lowlight strict-yuv: suppressing regular auto-enter (exp=%u/%u gain=%u/%u), waiting for invalid-exposure fallback\n",
+			exposure, exposure_max, gain, gain_max);
+
+	if (strict_low_luma_enter)
+		dev_info_ratelimited(&sensor->client->dev,
+			"deep-lowlight strict-yuv: low-luma enter fallback active (luma=%u exp=%u/%u gain=%u/%u)\n",
+			luma, exposure, exposure_max, gain, gain_max);
+
+	if (sensor->deep_lowlight_summing &&
+	    mt9m114_deep_lowlight_strict_ifp_yuv &&
+	    exposure_invalid &&
+	    want_exit_exposure_gain && !want_exit_luma)
+		want_exit = false;
+
+	if (sensor->deep_lowlight_summing &&
+	    mt9m114_deep_lowlight_strict_ifp_yuv &&
+	    sensor->ifp.deep_lowlight_invalid_exit_guard_until &&
+	    !time_after_eq(jiffies,
+			sensor->ifp.deep_lowlight_invalid_exit_guard_until) &&
+	    want_exit_exposure_gain && !want_exit_luma)
+		want_exit = false;
+
+	if (sensor->deep_lowlight_summing &&
+	    mt9m114_deep_lowlight_strict_ifp_yuv &&
+	    mt9m114_deep_lowlight_strict_luma_zero_low_gain_exit &&
+	    have_luma && luma == 0 &&
+	    exposure <= exposure_exit &&
+	    gain <= exit_gain_reserve) {
+		if (sensor->ifp.deep_lowlight_luma_zero_low_gain_count < 255)
+			sensor->ifp.deep_lowlight_luma_zero_low_gain_count++;
+	} else {
+		sensor->ifp.deep_lowlight_luma_zero_low_gain_count = 0;
+	}
+
+	if (sensor->ifp.deep_lowlight_luma_zero_low_gain_count >=
+	    max_t(unsigned int, 1,
+		  mt9m114_deep_lowlight_strict_luma_zero_low_gain_samples))
+		strict_luma_zero_low_gain_exit = true;
+
+	if (strict_luma_zero_low_gain_exit) {
+		want_exit_luma = true;
+		want_exit = true;
+		if (mt9m114_deep_lowlight_dump_stats_on_stale &&
+		    !sensor->ifp.deep_lowlight_stale_dumped &&
+		    sensor->ifp.deep_lowlight_luma_zero_low_gain_count >=
+		    MT9M114_DEEP_LOWLIGHT_STALE_DUMP_TRIGGER) {
+			ret = mt9m114_dump_stats(sensor);
+			if (ret)
+				dev_warn_ratelimited(&sensor->client->dev,
+					"deep-lowlight: stale/luma-zero diagnostic dump failed: %d\n",
+					ret);
+			sensor->ifp.deep_lowlight_stale_dumped = true;
+		}
+	}
+
+	if (sensor->deep_lowlight_summing && have_luma && luma == 0 &&
+	    gain >= on_saturation_gain) {
+		if (sensor->ifp.deep_lowlight_on_saturation_count < 255)
+			sensor->ifp.deep_lowlight_on_saturation_count++;
+	} else {
+		sensor->ifp.deep_lowlight_on_saturation_count = 0;
+	}
+
+	if (sensor->ifp.deep_lowlight_on_saturation_count >=
+	    MT9M114_DEEP_LOWLIGHT_ON_SATURATION_SAMPLES) {
+		on_saturation_exit = true;
+		want_exit = true;
+		want_exit_luma = true;
+	}
+
+	if (sensor->deep_lowlight_summing &&
+	    mt9m114_deep_lowlight_strict_ifp_yuv &&
+	    have_luma && have_center &&
+	    luma == 0 && center_luma == 0 &&
+	    gain <= on_saturation_gain) {
+		if (sensor->ifp.deep_lowlight_on_zero_stats_count < 255)
+			sensor->ifp.deep_lowlight_on_zero_stats_count++;
+	} else {
+		sensor->ifp.deep_lowlight_on_zero_stats_count = 0;
+	}
+
+	if (sensor->ifp.deep_lowlight_on_zero_stats_count >=
+	    MT9M114_DEEP_LOWLIGHT_ON_ZERO_STATS_TIMEOUT_SAMPLES) {
+		on_zero_stats_timeout_exit = true;
+		want_exit = true;
+		want_exit_luma = true;
+	}
+
+	pending_reason = strict_pending_zero_stats_enter ? "pending_zero_stats_timeout" :
+		(strict_low_luma_enter ? "low_luma_enter" :
+		 (strict_invalid_enter ? "invalid_enter" : "regular_enter_wait"));
+	on_reason = on_saturation_exit ? "on_saturation" :
+		(on_zero_stats_timeout_exit ? "on_zero_stats_timeout" :
+		(strict_luma_zero_low_gain_exit ? "luma_zero" :
+		 (want_exit ? "regular_exit" : "none")));
+
+	if (!sensor->deep_lowlight_summing &&
+	    (exposure >= (exposure_max * 9) / 10 || gain >= enter_gain))
+		dev_info_ratelimited(&sensor->client->dev,
+			"deep-lowlight pending: exp=%u/%u gain=%u/%u luma=%u center=%u enter=%u exit=(exp<=%u gain<=%u or luma>=%u)%s reason=%s\n",
+			exposure, exposure_max, gain, gain_max,
+			have_luma ? luma : 0,
+			have_center ? center_luma : 0,
+			enter_gain,
+			exposure_exit,
+			reserve_exit_valid ? exit_gain_reserve : exit_gain,
+			MT9M114_DEEP_LOWLIGHT_LUMA_EXIT,
+			reserve_exit_valid ? " [reserve:10fps+gain<50%]" : "",
+			pending_reason);
+
+	if (sensor->deep_lowlight_summing)
+		dev_info_ratelimited(&sensor->client->dev,
+			"deep-lowlight ON: exp=%u/%u gain=%u/%u luma=%u center=%u exit=(exp<=%u gain<=%u or luma>=%u)%s reason=%s\n",
+			exposure, exposure_max, gain, gain_max,
+			have_luma ? luma : 0,
+			have_center ? center_luma : 0,
+			exposure_exit,
+			reserve_exit_valid ? exit_gain_reserve : exit_gain,
+			MT9M114_DEEP_LOWLIGHT_LUMA_EXIT,
+			reserve_exit_valid ? " [reserve:10fps+gain<50%]" : "",
+			on_reason);
+
+	if (strict_luma_zero_low_gain_exit)
+		dev_warn_ratelimited(&sensor->client->dev,
+			"deep-lowlight: strict-YUV luma stuck at 0 with low gain (%u/%u), forcing OFF path (reason=luma_zero)\n",
+			sensor->ifp.deep_lowlight_luma_zero_low_gain_count,
+			max_t(unsigned int, 1,
+			      mt9m114_deep_lowlight_strict_luma_zero_low_gain_samples));
+
+	if (on_saturation_exit)
+		dev_warn_ratelimited(&sensor->client->dev,
+			"deep-lowlight: ON saturation guard triggered (luma=0 gain=%u/%u count=%u/%u), forcing OFF path (reason=on_saturation)\n",
+			gain, gain_max,
+			sensor->ifp.deep_lowlight_on_saturation_count,
+			MT9M114_DEEP_LOWLIGHT_ON_SATURATION_SAMPLES);
+
+	if (on_zero_stats_timeout_exit)
+		dev_warn_ratelimited(&sensor->client->dev,
+			"deep-lowlight: ON zero-stats timeout (luma=0 center=0 gain=%u/%u count=%u/%u), forcing OFF path (reason=on_zero_stats_timeout)\n",
+			gain, gain_max,
+			sensor->ifp.deep_lowlight_on_zero_stats_count,
+			MT9M114_DEEP_LOWLIGHT_ON_ZERO_STATS_TIMEOUT_SAMPLES);
+
+	if (sensor->deep_lowlight_summing) {
+		if (exposure == sensor->ifp.deep_lowlight_last_exposure &&
+		    gain == sensor->ifp.deep_lowlight_last_gain &&
+		    (!have_luma || luma == sensor->ifp.deep_lowlight_last_luma))
+			sensor->ifp.deep_lowlight_stale_count++;
+		else {
+			sensor->ifp.deep_lowlight_stale_count = 0;
+			sensor->ifp.deep_lowlight_stale_recover_count = 0;
+			sensor->ifp.deep_lowlight_luma_zero_low_gain_count = 0;
+			sensor->ifp.deep_lowlight_on_saturation_count = 0;
+			sensor->ifp.deep_lowlight_stale_dumped = false;
+		}
+
+		sensor->ifp.deep_lowlight_last_exposure = exposure;
+		sensor->ifp.deep_lowlight_last_gain = gain;
+		sensor->ifp.deep_lowlight_last_luma = have_luma ? luma : 0;
+
+		if (!want_exit &&
+		    sensor->ifp.deep_lowlight_stale_count >=
+		    MT9M114_DEEP_LOWLIGHT_STALE_LIMIT) {
+			if (mt9m114_deep_lowlight_strict_ifp_yuv) {
+				unsigned int stale_force_off_limit =
+					max_t(unsigned int, 1,
+					      mt9m114_deep_lowlight_strict_stale_force_off);
+				bool strict_stale_force_off_allowed;
+
+				if (sensor->ifp.deep_lowlight_stale_recover_count < 255)
+					sensor->ifp.deep_lowlight_stale_recover_count++;
+
+				strict_stale_force_off_allowed =
+					gain >= on_saturation_gain ||
+					sensor->ifp.deep_lowlight_stale_recover_count >=
+					min_t(unsigned int, 255,
+					      stale_force_off_limit *
+					      MT9M114_DEEP_LOWLIGHT_STALE_HARD_FORCE_OFF_MULTIPLIER);
+
+				if (mt9m114_deep_lowlight_dump_stats_on_stale &&
+				    !sensor->ifp.deep_lowlight_stale_dumped &&
+				    sensor->ifp.deep_lowlight_stale_recover_count >=
+				    MT9M114_DEEP_LOWLIGHT_STALE_DUMP_TRIGGER) {
+					ret = mt9m114_dump_stats(sensor);
+					if (ret)
+						dev_warn_ratelimited(&sensor->client->dev,
+							"deep-lowlight: stale telemetry diagnostic dump failed: %d\n",
+							ret);
+					sensor->ifp.deep_lowlight_stale_dumped = true;
+				}
+
+				if (strict_stale_force_off_allowed &&
+				    sensor->ifp.deep_lowlight_stale_recover_count >=
+				    stale_force_off_limit) {
+					ret = mt9m114_set_deep_lowlight_mode(sensor, false);
+					if (!ret) {
+						sensor->ifp.deep_lowlight_reentry_block_until =
+							jiffies + MT9M114_DEEP_LOWLIGHT_FORCE_OFF_REENTRY_COOLDOWN;
+						sensor->ifp.deep_lowlight_stale_count = 0;
+						sensor->ifp.deep_lowlight_stale_recover_count = 0;
+						sensor->ifp.deep_lowlight_invalid_enter_count = 0;
+						sensor->ifp.deep_lowlight_stale_dumped = false;
+						dev_warn_ratelimited(&sensor->client->dev,
+							"deep-lowlight: strict-YUV stale telemetry persisted, forcing OFF for recovery (reason=stale)\n");
+					} else {
+						dev_warn_ratelimited(&sensor->client->dev,
+							"deep-lowlight: strict-YUV stale force-OFF failed: %d\n",
+							ret);
+					}
+					return;
+				}
+
+				if (!strict_stale_force_off_allowed &&
+				    sensor->ifp.deep_lowlight_stale_recover_count >=
+				    stale_force_off_limit)
+					dev_warn_ratelimited(&sensor->client->dev,
+						"deep-lowlight: stale telemetry in strict-YUV mode at low gain (%u/%u), skipping force-OFF to avoid flicker (reason=stale_low_gain_hold)\n",
+						gain, gain_max);
+
+				ret = mt9m114_rekick_auto_exposure(sensor);
+				if (ret)
+					dev_warn_ratelimited(&sensor->client->dev,
+						"deep-lowlight: stale telemetry in strict-YUV mode, AE re-kick failed: %d (reason=stale)\n",
+						ret);
+				else
+					dev_warn_ratelimited(&sensor->client->dev,
+						"deep-lowlight: stale telemetry in strict-YUV mode, keeping ON and re-kicking AE (%u/%u) (reason=stale)\n",
+						sensor->ifp.deep_lowlight_stale_recover_count,
+						max_t(unsigned int, 1,
+						      mt9m114_deep_lowlight_strict_stale_force_off));
+				sensor->ifp.deep_lowlight_stale_count =
+					MT9M114_DEEP_LOWLIGHT_STALE_LIMIT;
+				return;
+			}
+
+			ret = mt9m114_set_deep_lowlight_mode(sensor, false);
+			if (!ret) {
+				sensor->ifp.deep_lowlight_reentry_block_until =
+					jiffies + MT9M114_DEEP_LOWLIGHT_REENTRY_COOLDOWN;
+				sensor->ifp.deep_lowlight_stale_count = 0;
+				sensor->ifp.deep_lowlight_faulted =
+					!mt9m114_deep_lowlight_strict_ifp_yuv;
+				if (mt9m114_deep_lowlight_strict_ifp_yuv)
+					dev_warn_ratelimited(&sensor->client->dev,
+						"deep-lowlight: forced OFF due to stale telemetry, keeping runtime switching enabled in strict-YUV mode\n");
+				else
+					dev_warn_ratelimited(&sensor->client->dev,
+						"deep-lowlight: forced OFF due to stale telemetry, disabling runtime switching until stream restart\n");
+			} else {
+				dev_dbg(&sensor->client->dev,
+					"deep-lowlight forced exit failed: %d\n", ret);
+			}
+			return;
+		}
+	}
+
+	if (!can_switch)
+		return;
+
+	if (!sensor->deep_lowlight_summing && want_enter && !reentry_blocked) {
+		sensor->ifp.deep_lowlight_transition_exposure = exposure;
+		sensor->ifp.deep_lowlight_transition_gain = gain;
+		sensor->ifp.deep_lowlight_transition_valid = true;
+		ret = mt9m114_set_deep_lowlight_mode(sensor, true);
+		if (ret)
+			dev_dbg(&sensor->client->dev,
+				"deep-lowlight enter failed: %d\n", ret);
+		else if (strict_invalid_enter)
+			sensor->ifp.deep_lowlight_invalid_exit_guard_until =
+				jiffies + MT9M114_DEEP_LOWLIGHT_INVALID_EXIT_GUARD;
+		else
+			sensor->ifp.deep_lowlight_invalid_exit_guard_until = 0;
+		if (!ret)
+			sensor->ifp.deep_lowlight_invalid_enter_count = 0;
+		if (!ret)
+			sensor->ifp.deep_lowlight_pending_zero_stats_count = 0;
+		if (!ret)
+			sensor->ifp.deep_lowlight_stale_recover_count = 0;
+		if (!ret)
+			sensor->ifp.deep_lowlight_luma_zero_low_gain_count = 0;
+		if (!ret)
+			sensor->ifp.deep_lowlight_on_saturation_count = 0;
+		if (!ret)
+			sensor->ifp.deep_lowlight_on_zero_stats_count = 0;
+	} else if (sensor->deep_lowlight_summing && want_exit) {
+		sensor->ifp.deep_lowlight_transition_exposure = exposure;
+		sensor->ifp.deep_lowlight_transition_gain = gain;
+		sensor->ifp.deep_lowlight_transition_valid = true;
+		ret = mt9m114_set_deep_lowlight_mode(sensor, false);
+		if (ret)
+			dev_dbg(&sensor->client->dev,
+				"deep-lowlight exit failed: %d\n", ret);
+		if (!ret && strict_luma_zero_low_gain_exit)
+			sensor->ifp.deep_lowlight_reentry_block_until =
+				jiffies + MT9M114_DEEP_LOWLIGHT_FORCE_OFF_REENTRY_COOLDOWN;
+		if (!ret)
+			sensor->ifp.deep_lowlight_invalid_enter_count = 0;
+		if (!ret)
+			sensor->ifp.deep_lowlight_pending_zero_stats_count = 0;
+		if (!ret)
+			sensor->ifp.deep_lowlight_stale_recover_count = 0;
+		if (!ret)
+			sensor->ifp.deep_lowlight_luma_zero_low_gain_count = 0;
+		if (!ret)
+			sensor->ifp.deep_lowlight_on_saturation_count = 0;
+		if (!ret)
+			sensor->ifp.deep_lowlight_on_zero_stats_count = 0;
+	}
+}
+
+static void mt9m114_deep_lowlight_work(struct work_struct *work)
+{
+	struct mt9m114 *sensor = container_of(to_delayed_work(work),
+					      struct mt9m114,
+					      ifp.deep_lowlight_work);
+	u64 exposure_u64;
+	u64 gain_u64;
+	u64 luma_u64 = 0;
+	u64 center_luma_u64 = 0;
+	bool have_luma = false;
+	bool have_center = false;
+	int ret;
+
+	if (!sensor->streaming)
+		return;
+
+	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
+		goto reschedule;
+
+	ret = cci_read(sensor->regmap,
+		       MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
+		       &exposure_u64, NULL);
+	if (ret)
+		goto out_pm;
+
+	ret = cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_ANALOG_GAIN,
+		       &gain_u64, NULL);
+	if (ret)
+		goto out_pm;
+
+	ret = cci_read(sensor->regmap, MT9M114_SMART_AE_STATS_AVG_LUMA,
+		       &luma_u64, NULL);
+	if (!ret)
+		have_luma = true;
+
+	ret = cci_read(sensor->regmap, MT9M114_SMART_AE_STATS_CENTER_LUMA,
+		       &center_luma_u64, NULL);
+	if (!ret)
+		have_center = true;
+
+	mt9m114_maybe_switch_deep_lowlight_values(sensor, exposure_u64, gain_u64,
+					    have_luma, luma_u64,
+					    have_center, center_luma_u64);
+
+out_pm:
+	pm_runtime_put_autosuspend(&sensor->client->dev);
+
+reschedule:
+	if (sensor->streaming)
+		schedule_delayed_work(&sensor->ifp.deep_lowlight_work,
+				      msecs_to_jiffies(MT9M114_DEEP_LOWLIGHT_INTERVAL_MS));
+}
+
+static unsigned int mt9m114_gain_threshold(unsigned int min,
+					  unsigned int max,
+					  unsigned int percent)
+{
+	u32 range;
+
+	if (max <= min)
+		return 0;
+
+	range = max - min;
+	return min + div_u64((u64)range * percent, 100);
+}
+
+static int mt9m114_calc_timing_for_fps(struct mt9m114 *sensor,
+				      unsigned int fps,
+				      u32 *frame_length,
+				      u32 *exposure,
+				      u32 *frame_height)
+{
+	struct v4l2_subdev_state *pa_state;
+	const struct v4l2_mbus_framefmt *format;
+	u64 frame_length_u64;
+	u32 height;
+	u32 line_length;
+	bool locked = false;
+
+	if (!fps || !sensor->pa.hblank)
+		return -EINVAL;
+
+	pa_state = v4l2_subdev_get_locked_active_state(&sensor->pa.sd);
+	if (!pa_state) {
+		pa_state = v4l2_subdev_lock_and_get_active_state(&sensor->pa.sd);
+		locked = true;
+	}
+
+	format = v4l2_subdev_state_get_format(pa_state, 0);
+	if (!format) {
+		if (locked)
+			v4l2_subdev_unlock_state(pa_state);
+		return -EINVAL;
+	}
+
+	height = max_t(u32, format->height, MT9M114_PIXEL_ARRAY_HEIGHT);
+	line_length = format->width + sensor->pa.hblank->val;
+	if (!line_length) {
+		if (locked)
+			v4l2_subdev_unlock_state(pa_state);
+		return -EINVAL;
+	}
+
+	frame_length_u64 = div_u64((u64)sensor->pixrate,
+				   (u64)line_length * fps);
+	if (frame_length_u64 < (u64)height + MT9M114_MIN_VBLANK)
+		frame_length_u64 = (u64)height + MT9M114_MIN_VBLANK;
+	if (frame_length_u64 > MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX)
+		frame_length_u64 = MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX;
+
+	if (frame_length)
+		*frame_length = (u32)frame_length_u64;
+	if (exposure)
+		*exposure = (u32)frame_length_u64 - 2;
+	if (frame_height)
+		*frame_height = height;
+
+	if (locked)
+		v4l2_subdev_unlock_state(pa_state);
+
+	return 0;
+}
+
+static int mt9m114_set_ae_fps_window(struct mt9m114 *sensor,
+				    unsigned int min_fps,
+				    unsigned int max_fps)
+{
+	u16 min_rate;
+	u16 max_rate;
+	int ret = 0;
+
+	if (!min_fps || !max_fps)
+		return -EINVAL;
+
+	if (min_fps > max_fps)
+		swap(min_fps, max_fps);
+
+	min_rate = min_fps << 8;
+	max_rate = max_fps << 8;
+
+	cci_write(sensor->regmap, MT9M114_CAM_AET_MIN_FRAME_RATE, min_rate, &ret);
+	cci_write(sensor->regmap, MT9M114_CAM_AET_MAX_FRAME_RATE, max_rate, &ret);
+
+	return ret;
+}
+
+static int mt9m114_seed_exposure_for_fps(struct mt9m114 *sensor,
+					 unsigned int fps)
+{
+	u32 frame_length;
+	u32 exposure;
+	u32 frame_height;
+	u32 vblank;
+	int ret;
+
+	ret = mt9m114_calc_timing_for_fps(sensor, fps, &frame_length,
+					  &exposure, &frame_height);
+	if (ret)
+		return ret;
+
+	ret = mt9m114_group_hold(sensor, true);
+	if (ret)
+		return ret;
+
+	cci_write(sensor->regmap, MT9M114_FRAME_LENGTH_LINES, frame_length, &ret);
+	cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
+		  frame_length, &ret);
+	cci_write(sensor->regmap, MT9M114_COARSE_INTEGRATION_TIME, exposure, &ret);
+	cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
+		  exposure, &ret);
+
+	if (ret)
+		mt9m114_group_hold(sensor, false);
+	else
+		ret = mt9m114_group_hold(sensor, false);
+
+	if (ret)
+		return ret;
+
+	vblank = frame_length - frame_height;
+	if (sensor->pa.vblank) {
+		sensor->pa.vblank->val = vblank;
+		sensor->pa.vblank->cur.val = vblank;
+	}
+	if (sensor->pa.exposure) {
+		sensor->pa.exposure->val = exposure;
+		sensor->pa.exposure->cur.val = exposure;
+	}
+
+	return 0;
+}
+
+static int mt9m114_seed_transition_controls(struct mt9m114 *sensor,
+					 bool enable)
+{
+	unsigned int target_fps = enable ? MT9M114_DEEP_LOWLIGHT_FPS_ENTER_SEED
+					 : MT9M114_DEEP_LOWLIGHT_FPS_EXIT_SEED;
+	u32 frame_length;
+	u32 exposure_limit;
+	u32 frame_height;
+	u32 vblank;
+	u32 exposure;
+	u32 gain;
+	u32 gain_min;
+	u32 gain_max;
+	u32 off_gain_cap;
+	u32 off_dark_gain;
+	u32 src_exposure;
+	u32 src_gain;
+	u64 desired_ev;
+	int ret;
+
+	if (!sensor->pa.gain)
+		return -EINVAL;
+
+	gain_min = sensor->pa.gain->minimum;
+	gain_max = sensor->pa.gain->maximum;
+	off_gain_cap = mt9m114_gain_threshold(gain_min, gain_max,
+					 MT9M114_DEEP_LOWLIGHT_GAIN_OFF_SEED_CAP_PCT);
+	off_dark_gain = mt9m114_gain_threshold(gain_min, gain_max,
+				      MT9M114_DEEP_LOWLIGHT_OFF_DARK_GAIN_PCT);
+
+	if (sensor->ifp.deep_lowlight_transition_valid) {
+		src_exposure = sensor->ifp.deep_lowlight_transition_exposure;
+		src_gain = sensor->ifp.deep_lowlight_transition_gain;
+	} else {
+		src_exposure = sensor->pa.exposure ? sensor->pa.exposure->val : 0;
+		src_gain = sensor->pa.gain->val;
+	}
+
+	if (!enable && mt9m114_deep_lowlight_strict_ifp_yuv &&
+	    src_gain <= off_dark_gain)
+		target_fps = MT9M114_DEEP_LOWLIGHT_FPS_EXIT_SEED_DARK;
+
+	ret = mt9m114_calc_timing_for_fps(sensor, target_fps, &frame_length,
+					  &exposure_limit, &frame_height);
+	if (ret)
+		return ret;
+
+	if (!src_exposure)
+		src_exposure = exposure_limit;
+	if (src_gain < gain_min)
+		src_gain = gain_min;
+
+	desired_ev = (u64)src_exposure * src_gain;
+
+	if (enable) {
+		desired_ev = div_u64(desired_ev,
+				    MT9M114_DEEP_LOWLIGHT_TRANSITION_SCALE);
+		exposure = min_t(u32, src_exposure, exposure_limit);
+		if (!exposure)
+			exposure = 1;
+		gain = clamp_t(u32, div_u64(desired_ev, exposure),
+			       gain_min, gain_max);
+		if (gain == gain_min) {
+			u32 exp_from_ev = div_u64(desired_ev, gain_min);
+
+			exposure = clamp_t(u32, exp_from_ev, 1, exposure_limit);
+		}
+	} else {
+		desired_ev *= MT9M114_DEEP_LOWLIGHT_TRANSITION_SCALE_OFF;
+		exposure = min_t(u32,
+				 (u32)((u64)src_exposure *
+				 MT9M114_DEEP_LOWLIGHT_TRANSITION_SCALE_OFF),
+				 exposure_limit);
+		if (!exposure)
+			exposure = 1;
+		gain = clamp_t(u32, div_u64(desired_ev, exposure),
+			       gain_min, gain_max);
+		if (gain == gain_max) {
+			u32 exp_from_ev = div_u64(desired_ev, gain_max);
+
+			exposure = clamp_t(u32, exp_from_ev, 1, exposure_limit);
+		}
+		if (gain > off_gain_cap)
+			gain = off_gain_cap;
+	}
+
+	gain = clamp_t(u32, gain, gain_min, gain_max);
+
+	ret = mt9m114_group_hold(sensor, true);
+	if (ret)
+		return ret;
+
+	cci_write(sensor->regmap, MT9M114_FRAME_LENGTH_LINES, frame_length, &ret);
+	cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
+		  frame_length, &ret);
+	cci_write(sensor->regmap, MT9M114_COARSE_INTEGRATION_TIME, exposure, &ret);
+	cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
+		  exposure, &ret);
+	cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_ANALOG_GAIN,
+		  gain, &ret);
+	cci_write(sensor->regmap, MT9M114_GLOBAL_GAIN, gain, &ret);
+
+	if (ret)
+		mt9m114_group_hold(sensor, false);
+	else
+		ret = mt9m114_group_hold(sensor, false);
+
+	if (ret)
+		return ret;
+
+	vblank = frame_length - frame_height;
+	if (sensor->pa.vblank) {
+		sensor->pa.vblank->val = vblank;
+		sensor->pa.vblank->cur.val = vblank;
+	}
+	if (sensor->pa.exposure) {
+		sensor->pa.exposure->val = exposure;
+		sensor->pa.exposure->cur.val = exposure;
+	}
+	if (sensor->pa.gain) {
+		sensor->pa.gain->val = gain;
+		sensor->pa.gain->cur.val = gain;
+	}
+
+	sensor->ifp.deep_lowlight_transition_valid = false;
+
+	dev_dbg(&sensor->client->dev,
+		"deep-lowlight: transition seed %s fps=%u exp=%u gain=%u (src exp=%u gain=%u)\n",
+		enable ? "ON" : "OFF", target_fps, exposure, gain,
+		src_exposure, src_gain);
+
+	return 0;
+}
+
+static int mt9m114_get_deep_lowlight_geometry(struct mt9m114 *sensor,
+					     u16 *binned_height,
+					     u16 *output_height)
+{
+	struct v4l2_subdev_state *ifp_state;
+	const struct v4l2_mbus_framefmt *ifp_fmt;
+	bool ifp_locked = false;
+	u64 out_w;
+	u64 out_h;
+	u64 out_fmt;
+	u64 out_mode;
+	int ret;
+
+	ret = cci_read(sensor->regmap, MT9M114_CAM_OUTPUT_WIDTH, &out_w, NULL);
+	if (ret)
+		return ret;
+
+	ret = cci_read(sensor->regmap, MT9M114_CAM_OUTPUT_HEIGHT, &out_h, NULL);
+	if (ret)
+		return ret;
+
+	if (!out_w || !out_h) {
+		ifp_state = v4l2_subdev_get_locked_active_state(&sensor->ifp.sd);
+		if (!ifp_state) {
+			ifp_state = v4l2_subdev_lock_and_get_active_state(&sensor->ifp.sd);
+			ifp_locked = true;
+		}
+
+		ifp_fmt = v4l2_subdev_state_get_format(ifp_state, 1);
+		if (ifp_fmt) {
+			if (!out_w && ifp_fmt->width)
+				out_w = ifp_fmt->width;
+			if (!out_h && ifp_fmt->height)
+				out_h = ifp_fmt->height;
+		}
+
+		if (ifp_locked)
+			v4l2_subdev_unlock_state(ifp_state);
+
+		dev_dbg_ratelimited(&sensor->client->dev,
+			"deep-lowlight: recovered transient output geometry via active fmt: %llux%llu\n",
+			out_w, out_h);
+	}
+
+	ret = cci_read(sensor->regmap, MT9M114_CAM_OUTPUT_FORMAT, &out_fmt, NULL);
+	if (ret)
+		return ret;
+
+	out_mode = out_fmt & MT9M114_CAM_OUTPUT_FORMAT_FORMAT_MASK;
+	if (out_mode == MT9M114_CAM_OUTPUT_FORMAT_FORMAT_BAYER &&
+	    !mt9m114_deep_lowlight_allow_raw_switch) {
+		dev_warn_ratelimited(&sensor->client->dev,
+			"deep-lowlight: RAW/BAYER runtime switch disabled for stability (set deep_lowlight_allow_raw_switch=1 to force test)\n");
+		return -EINVAL;
+	}
+
+	if (out_mode != MT9M114_CAM_OUTPUT_FORMAT_FORMAT_YUV &&
+	    out_mode != MT9M114_CAM_OUTPUT_FORMAT_FORMAT_BAYER) {
+		dev_warn_ratelimited(&sensor->client->dev,
+			"deep-lowlight: skip switch for unsupported output format 0x%04llx\n",
+			out_fmt);
+		return -EINVAL;
+	}
+
+	if (out_w != MT9M114_DEEP_LOWLIGHT_OUTPUT_WIDTH &&
+	    out_w != MT9M114_DEEP_LOWLIGHT_OUTPUT_WIDTH_1288 &&
+	    out_w != MT9M114_DEEP_LOWLIGHT_OUTPUT_WIDTH_1296)
+		return -EINVAL;
+
+	if (out_h == MT9M114_DEEP_LOWLIGHT_OUTPUT_HEIGHT_720) {
+		*binned_height = MT9M114_DEEP_LOWLIGHT_BINNED_HEIGHT_720;
+		*output_height = MT9M114_DEEP_LOWLIGHT_OUTPUT_HEIGHT_720;
+		return 0;
+	}
+
+	if (out_h == MT9M114_DEEP_LOWLIGHT_OUTPUT_HEIGHT_960) {
+		*binned_height = MT9M114_DEEP_LOWLIGHT_BINNED_HEIGHT_960;
+		*output_height = MT9M114_DEEP_LOWLIGHT_OUTPUT_HEIGHT_960;
+		return 0;
+	}
+
+	if (out_h == MT9M114_DEEP_LOWLIGHT_OUTPUT_HEIGHT_968) {
+		*binned_height = MT9M114_DEEP_LOWLIGHT_BINNED_HEIGHT_976;
+		*output_height = MT9M114_DEEP_LOWLIGHT_OUTPUT_HEIGHT_968;
+		return 0;
+	}
+
+	if (out_h == MT9M114_DEEP_LOWLIGHT_OUTPUT_HEIGHT_976) {
+		*binned_height = MT9M114_DEEP_LOWLIGHT_BINNED_HEIGHT_976;
+		*output_height = MT9M114_DEEP_LOWLIGHT_OUTPUT_HEIGHT_976;
+		return 0;
+	}
+
+	dev_dbg_ratelimited(&sensor->client->dev,
+			    "deep-lowlight: skip switch for output %llux%llu (expected 1280x720/960, 1288x968, or 1296x976)\n",
+			    out_w, out_h);
+
+	return -EINVAL;
+}
+
+static int mt9m114_reapply_active_stream_config(struct mt9m114 *sensor)
+{
+	struct v4l2_subdev_state *pa_state;
+	struct v4l2_subdev_state *ifp_state;
+	bool pa_locked = false;
+	bool ifp_locked = false;
+	int ret;
+
+	pa_state = v4l2_subdev_get_locked_active_state(&sensor->pa.sd);
+	if (!pa_state) {
+		pa_state = v4l2_subdev_lock_and_get_active_state(&sensor->pa.sd);
+		pa_locked = true;
+	}
+
+	ifp_state = v4l2_subdev_get_locked_active_state(&sensor->ifp.sd);
+	if (!ifp_state) {
+		ifp_state = v4l2_subdev_lock_and_get_active_state(&sensor->ifp.sd);
+		ifp_locked = true;
+	}
+
+	ret = mt9m114_configure_ifp(sensor, ifp_state);
+	if (ret)
+		goto out_unlock;
+
+	ret = mt9m114_configure_pa(sensor, pa_state);
+	if (ret)
+		goto out_unlock;
+
+	ret = mt9m114_set_frame_rate_with_state(sensor, pa_state);
+
+out_unlock:
+	if (ifp_locked)
+		v4l2_subdev_unlock_state(ifp_state);
+	if (pa_locked)
+		v4l2_subdev_unlock_state(pa_state);
+
+	return ret;
+}
+
+static int mt9m114_rekick_auto_exposure(struct mt9m114 *sensor)
+{
+	int ret;
+
+	if (!sensor->ifp.ae_auto)
+		return 0;
+
+	ret = cci_write(sensor->regmap, MT9M114_AE_TRACK_ALGO, 0, NULL);
+	if (ret)
+		return ret;
+
+	ret = cci_write(sensor->regmap, MT9M114_AE_TRACK_ALGO,
+			MT9M114_AE_TRACK_EXEC_AUTOMATIC_EXPOSURE | 0x00fe,
+			NULL);
+	if (ret)
+		return ret;
+
+	return cci_write(sensor->regmap, MT9M114_AE_TRACK_AE_TRACKING_DAMPENING_SPEED,
+			 MT9M114_AE_TRACK_SPEED_NORMAL, NULL);
+}
+
+static int mt9m114_set_deep_lowlight_mode(struct mt9m114 *sensor, bool enable)
+{
+	u64 read_mode_u64;
+	u16 read_mode;
+	u16 binned_height;
+	u16 output_height;
+	u16 output_width;
+	int ret;
+
+	if (!sensor->streaming)
+		return 0;
+
+	ret = mt9m114_get_deep_lowlight_geometry(sensor, &binned_height,
+						 &output_height);
+	if (ret)
+		return 0;
+
+	if (output_height == MT9M114_DEEP_LOWLIGHT_OUTPUT_HEIGHT_976)
+		output_width = MT9M114_DEEP_LOWLIGHT_OUTPUT_WIDTH_1296;
+	else if (output_height == MT9M114_DEEP_LOWLIGHT_OUTPUT_HEIGHT_968)
+		output_width = MT9M114_DEEP_LOWLIGHT_OUTPUT_WIDTH_1288;
+	else
+		output_width = MT9M114_DEEP_LOWLIGHT_OUTPUT_WIDTH;
+
+	ret = cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
+		       &read_mode_u64, NULL);
+	if (ret)
+		return ret;
+
+	read_mode = read_mode_u64;
+	read_mode &= ~(MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_MASK |
+		       MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_MASK);
+	if (enable)
+		read_mode |= MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_SUMMING |
+			     MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_SUMMING;
+
+	ret = 0;
+	cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
+		  read_mode, &ret);
+	if (ret)
+		return ret;
+
+	if (enable) {
+		ret = mt9m114_reapply_active_stream_config(sensor);
+		if (ret)
+			dev_warn(&sensor->client->dev,
+				 "deep-lowlight: reapply active config failed: %d\n",
+				 ret);
+
+		ret = mt9m114_set_ae_fps_window(sensor,
+						MT9M114_DEEP_LOWLIGHT_FPS_MIN,
+						MT9M114_DEEP_LOWLIGHT_FPS_MAX);
+		if (ret)
+			dev_warn(&sensor->client->dev,
+				 "deep-lowlight: failed to set %u-%u fps window: %d\n",
+				 MT9M114_DEEP_LOWLIGHT_FPS_MIN,
+				 MT9M114_DEEP_LOWLIGHT_FPS_MAX,
+				 ret);
+
+		ret = mt9m114_seed_transition_controls(sensor, true);
+		if (ret)
+			ret = mt9m114_seed_exposure_for_fps(sensor,
+						  MT9M114_DEEP_LOWLIGHT_FPS_ENTER_SEED);
+		if (ret)
+			dev_warn(&sensor->client->dev,
+				 "deep-lowlight: failed to seed %u fps on enter: %d\n",
+				 MT9M114_DEEP_LOWLIGHT_FPS_ENTER_SEED, ret);
+	}
+
+	if (!enable) {
+		ret = mt9m114_reapply_active_stream_config(sensor);
+		if (ret)
+			dev_warn(&sensor->client->dev,
+				 "deep-lowlight: reapply active config failed: %d\n",
+				 ret);
+
+		ret = mt9m114_seed_transition_controls(sensor, false);
+		if (ret)
+			ret = mt9m114_seed_exposure_for_fps(sensor,
+						  MT9M114_DEEP_LOWLIGHT_FPS_EXIT_SEED);
+		if (ret)
+			dev_warn(&sensor->client->dev,
+				 "deep-lowlight: failed to seed %u fps on exit: %d\n",
+				 MT9M114_DEEP_LOWLIGHT_FPS_EXIT_SEED, ret);
+
+		ret = mt9m114_rekick_auto_exposure(sensor);
+		if (ret)
+			dev_warn(&sensor->client->dev,
+				 "deep-lowlight: AE re-kick failed: %d\n", ret);
+	}
+
+	ret = mt9m114_set_state(sensor, MT9M114_SYS_STATE_ENTER_CONFIG_CHANGE);
+	if (ret)
+		return ret;
+
+	ret = mt9m114_poll_state(sensor, MT9M114_SYS_STATE_STREAMING);
+	if (ret)
+		return ret;
+
+	sensor->deep_lowlight_summing = enable;
+	sensor->ifp.deep_lowlight_last_switch = jiffies;
+	if (!enable)
+		sensor->ifp.deep_lowlight_invalid_exit_guard_until = 0;
+
+	dev_info(&sensor->client->dev,
+		 "deep-lowlight: switched %s (2x2 summing, output %ux%u)\n",
+		 enable ? "ON" : "OFF", output_width, output_height);
+
+	return 0;
+}
+
+static void mt9m114_maybe_switch_deep_lowlight(struct mt9m114 *sensor)
+{
+	unsigned int gain;
+	unsigned int exposure;
+
+	gain = sensor->pa.gain->val;
+	exposure = sensor->pa.exposure->val;
+
+	mt9m114_maybe_switch_deep_lowlight_values(sensor, exposure, gain,
+					    false, 0, false, 0);
+}
+
 static int mt9m114_write_exposure(struct mt9m114 *sensor, u32 exposure,
 				  const struct v4l2_mbus_framefmt *format)
 {
@@ -1307,6 +3021,24 @@ static int mt9m114_pa_g_ctrl(struct v4l2_ctrl *ctrl)
 		return 0;
 
 	switch (ctrl->id) {
+	case V4L2_CID_VBLANK:
+		ret = cci_read(sensor->regmap, MT9M114_FRAME_LENGTH_LINES,
+			       &value, NULL);
+		if (ret)
+			break;
+
+		if (!sensor->pa.active_height)
+			sensor->pa.active_height = MT9M114_PIXEL_ARRAY_HEIGHT;
+
+		if (value <= sensor->pa.active_height)
+			ctrl->val = MT9M114_MIN_VBLANK;
+		else
+			ctrl->val = clamp_t(u32, value - sensor->pa.active_height,
+					 MT9M114_MIN_VBLANK,
+					 MT9M114_MAX_VBLANK_LOWLIGHT);
+		ret = 0;
+		break;
+
 	case V4L2_CID_EXPOSURE:
 		ret = cci_read(sensor->regmap,
 			       MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
@@ -1349,7 +3081,11 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
 		return 0;
 
-	state = v4l2_subdev_lock_and_get_active_state(&sensor->pa.sd);
+	state = v4l2_subdev_get_locked_active_state(&sensor->pa.sd);
+	if (!state) {
+		pm_runtime_put_autosuspend(&sensor->client->dev);
+		return -EINVAL;
+	}
 	format = v4l2_subdev_state_get_format(state, 0);
 
 	switch (ctrl->id) {
@@ -1367,6 +3103,19 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 			  ctrl->val, &ret);
 		break;
 
+	case V4L2_CID_ANALOGUE_GAIN:
+		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_ANALOG_GAIN,
+			  ctrl->val, &ret);
+		cci_write(sensor->regmap, MT9M114_GLOBAL_GAIN,
+			  ctrl->val, &ret);
+		if (!ret)
+			mt9m114_maybe_switch_deep_lowlight(sensor);
+		break;
+
+	case V4L2_CID_PIXEL_RATE:
+		/* Read-only, nothing to apply. */
+		break;
+
 	case V4L2_CID_EXPOSURE:
 		ret = mt9m114_ensure_manual_ae(sensor);
 		if (ret)
@@ -1381,6 +3130,8 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 			mt9m114_group_hold(sensor, false);
 		else
 			ret = mt9m114_group_hold(sensor, false);
+		if (!ret)
+			mt9m114_maybe_switch_deep_lowlight(sensor);
 		break;
 
 	case V4L2_CID_VBLANK:
@@ -1445,7 +3196,6 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	}
 
-	v4l2_subdev_unlock_state(state);
 	pm_runtime_put_autosuspend(&sensor->client->dev);
 
 	return ret;
@@ -1479,6 +3229,7 @@ static void mt9m114_pa_ctrl_update_exposure(struct mt9m114 *sensor, bool manual)
 }
 
 static void mt9m114_pa_ctrl_update_blanking(struct mt9m114 *sensor,
+					    struct v4l2_subdev_state *state,
 					    const struct v4l2_mbus_framefmt *format)
 {
 	unsigned int max_blank;
@@ -1489,10 +3240,16 @@ static void mt9m114_pa_ctrl_update_blanking(struct mt9m114 *sensor,
 	__v4l2_ctrl_modify_range(sensor->pa.hblank, MT9M114_MIN_HBLANK,
 				 max_blank, 1, MT9M114_DEF_HBLANK);
 
+	sensor->pa.active_width = format->width;
+	sensor->pa.active_height = format->height;
+
 	max_blank = MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX
 		  - format->height;
 	__v4l2_ctrl_modify_range(sensor->pa.vblank, MT9M114_MIN_VBLANK,
 				 max_blank, 1, MT9M114_DEF_VBLANK);
+
+	mt9m114_update_vblank_range_for_min_fps(sensor, state,
+						     mt9m114_get_min_fps(sensor));
 }
 
 /* -----------------------------------------------------------------------------
@@ -1584,7 +3341,7 @@ static int mt9m114_pa_set_fmt(struct v4l2_subdev *sd,
 	fmt->format = *format;
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
-		mt9m114_pa_ctrl_update_blanking(sensor, format);
+		mt9m114_pa_ctrl_update_blanking(sensor, state, format);
 
 	return 0;
 }
@@ -1658,7 +3415,7 @@ static int mt9m114_pa_set_selection(struct v4l2_subdev *sd,
 	if (sel->which != V4L2_SUBDEV_FORMAT_ACTIVE)
 		return ret;
 
-	mt9m114_pa_ctrl_update_blanking(sensor, format);
+	mt9m114_pa_ctrl_update_blanking(sensor, state, format);
 
 	/* Apply values immediately if streaming. */
 	if (sensor->streaming) {
@@ -1797,10 +3554,16 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 	if (sensor->pa.gain)
 		sensor->pa.gain->flags |= V4L2_CTRL_FLAG_VOLATILE;
 
-	v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops,
-			  V4L2_CID_PIXEL_RATE,
-			  sensor->pixrate, sensor->pixrate, 1,
-			  sensor->pixrate);
+	{
+		struct v4l2_ctrl *pixel_rate;
+
+		pixel_rate = v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops,
+					 V4L2_CID_PIXEL_RATE,
+					 sensor->pixrate, sensor->pixrate, 1,
+					 sensor->pixrate);
+		if (pixel_rate)
+			pixel_rate->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	}
 
 	v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops,
 			  V4L2_CID_HFLIP,
@@ -1823,7 +3586,7 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 	/* Update the range of the blanking controls based on the format. */
 	state = v4l2_subdev_lock_and_get_active_state(sd);
 	format = v4l2_subdev_state_get_format(state, 0);
-	mt9m114_pa_ctrl_update_blanking(sensor, format);
+	mt9m114_pa_ctrl_update_blanking(sensor, state, format);
 	v4l2_subdev_unlock_state(state);
 
 	sd->ctrl_handler = hdl;
@@ -1873,6 +3636,126 @@ static inline struct mt9m114 *ifp_ctrl_to_mt9m114(struct v4l2_ctrl *ctrl)
 	return container_of(ctrl->handler, struct mt9m114, ifp.hdl);
 }
 
+static int mt9m114_read_logical_u16(struct mt9m114 *sensor, u16 address,
+				    u16 *value)
+{
+	u64 raw = 0;
+	int ret = 0;
+
+	cci_write(sensor->regmap, MT9M114_LOGICAL_ADDRESS_ACCESS, address, &ret);
+	cci_read(sensor->regmap, MT9M114_MCU_VARIABLE_DATA0, &raw, &ret);
+	if (ret)
+		return ret;
+
+	*value = raw;
+
+	return 0;
+}
+
+static int mt9m114_dump_stats(struct mt9m114 *sensor)
+{
+	static const u16 blc_addr = 0x0a06;
+	static const u16 stats_start = 0x0a54;
+	static const u16 stats_end = 0x0a86;
+	static const unsigned int values_per_line = 5;
+	u16 values[((stats_end - stats_start) / 2) + 1];
+	u16 blc = 0;
+	u32 sum = 0;
+	u32 low_sum = 0;
+	u32 mid_sum = 0;
+	u32 high_sum = 0;
+	u16 peak = 0;
+	u16 peak_addr = stats_start;
+	u16 non_zero = 0;
+	const char *dominant_zone = "mixed";
+	unsigned int i;
+	int ret;
+
+	ret = mt9m114_read_logical_u16(sensor, blc_addr, &blc);
+	if (ret) {
+		dev_err(&sensor->client->dev,
+			"debug-dump: failed reading BLC 0x%04x (%d)\n",
+			blc_addr, ret);
+		return ret;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(values); i++) {
+		u16 addr = stats_start + i * 2;
+
+		ret = mt9m114_read_logical_u16(sensor, addr, &values[i]);
+		if (ret) {
+			dev_err(&sensor->client->dev,
+				"debug-dump: failed reading AE zone @0x%04x (%d)\n",
+				addr, ret);
+			return ret;
+		}
+
+		sum += values[i];
+		if (i < ARRAY_SIZE(values) / 3)
+			low_sum += values[i];
+		else if (i < (2 * ARRAY_SIZE(values)) / 3)
+			mid_sum += values[i];
+		else
+			high_sum += values[i];
+
+		if (values[i])
+			non_zero++;
+		if (values[i] >= peak) {
+			peak = values[i];
+			peak_addr = addr;
+		}
+	}
+
+	if (low_sum > mid_sum && low_sum > high_sum)
+		dominant_zone = "low";
+	else if (mid_sum > low_sum && mid_sum > high_sum)
+		dominant_zone = "mid";
+	else if (high_sum > low_sum && high_sum > mid_sum)
+		dominant_zone = "high";
+
+	dev_info(&sensor->client->dev,
+		 "debug-dump: logical BLC[0x%04x]=0x%04x (%u)\n",
+		 blc_addr, blc, blc);
+	dev_info(&sensor->client->dev,
+		 "debug-dump: AE summary: sum=%u nonzero=%u/%zu peak=%u @0x%04x\n",
+		 sum, non_zero, ARRAY_SIZE(values), peak, peak_addr);
+	dev_info(&sensor->client->dev,
+		 "debug-dump: AE buckets: low=%u mid=%u high=%u dominant=%s\n",
+		 low_sum, mid_sum, high_sum, dominant_zone);
+
+	for (i = 0; i < ARRAY_SIZE(values); i += values_per_line) {
+		unsigned int end = min(i + values_per_line, (unsigned int)ARRAY_SIZE(values));
+
+		if (end - i == 5)
+			dev_info(&sensor->client->dev,
+				 "debug-dump: AE[0x%04x..0x%04x] = %u %u %u %u %u\n",
+				 stats_start + i * 2, stats_start + (end - 1) * 2,
+				 values[i], values[i + 1], values[i + 2], values[i + 3], values[i + 4]);
+		else if (end - i == 4)
+			dev_info(&sensor->client->dev,
+				 "debug-dump: AE[0x%04x..0x%04x] = %u %u %u %u\n",
+				 stats_start + i * 2, stats_start + (end - 1) * 2,
+				 values[i], values[i + 1], values[i + 2], values[i + 3]);
+		else if (end - i == 3)
+			dev_info(&sensor->client->dev,
+				 "debug-dump: AE[0x%04x..0x%04x] = %u %u %u\n",
+				 stats_start + i * 2, stats_start + (end - 1) * 2,
+				 values[i], values[i + 1], values[i + 2]);
+		else if (end - i == 2)
+			dev_info(&sensor->client->dev,
+				 "debug-dump: AE[0x%04x..0x%04x] = %u %u\n",
+				 stats_start + i * 2, stats_start + (end - 1) * 2,
+				 values[i], values[i + 1]);
+		else
+			dev_info(&sensor->client->dev,
+				 "debug-dump: AE[0x%04x..0x%04x] = %u\n",
+				 stats_start + i * 2, stats_start + (end - 1) * 2,
+				 values[i]);
+	}
+
+	return 0;
+}
+
 static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct mt9m114 *sensor = ifp_ctrl_to_mt9m114(ctrl);
@@ -1882,6 +3765,31 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 	if (ctrl->id == V4L2_CID_EXPOSURE_AUTO)
 		mt9m114_pa_ctrl_update_exposure(sensor,
 						ctrl->val != V4L2_EXPOSURE_AUTO);
+
+	if (ctrl->id == V4L2_CID_EXPOSURE_AUTO) {
+		sensor->ifp.ae_auto = ctrl->val == V4L2_EXPOSURE_AUTO;
+		if (sensor->pa.vblank) {
+			if (sensor->ifp.ae_auto)
+				sensor->pa.vblank->flags |= V4L2_CTRL_FLAG_VOLATILE;
+			else
+				sensor->pa.vblank->flags &= ~V4L2_CTRL_FLAG_VOLATILE;
+		}
+
+		if (!sensor->ifp.ae_auto)
+			cancel_delayed_work_sync(&sensor->ifp.smart_meter_work);
+	}
+
+	if (ctrl->id == V4L2_CID_ILLUMINATORS_1) {
+		ret = pm_runtime_resume_and_get(&sensor->client->dev);
+		if (ret < 0)
+			return ret;
+
+		ret = mt9m114_dump_stats(sensor);
+
+		pm_runtime_put_autosuspend(&sensor->client->dev);
+
+		return ret;
+	}
 
 	/* V4L2 controls values are applied only when power is up. */
 	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
@@ -1917,6 +3825,31 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 		if (ret)
 			break;
 
+		ret = mt9m114_set_frame_rate(sensor);
+		if (ret)
+			break;
+
+		if (sensor->ifp.ae_auto && sensor->streaming && mt9m114_smart_metering) {
+			sensor->ifp.smart_metering_last_switch = 0;
+			sensor->ifp.smart_metering_active_preset =
+				sensor->pa.ae_metering_preset ?
+				sensor->pa.ae_metering_preset->val :
+				MT9M114_METERING_PRESET_CENTER;
+			schedule_delayed_work(&sensor->ifp.smart_meter_work,
+					      msecs_to_jiffies(MT9M114_SMART_METER_INTERVAL_MS));
+		} else {
+			mt9m114_smart_metering_set_blc(sensor, false);
+		}
+
+		break;
+
+	case V4L2_CID_PIXEL_RATE:
+	case V4L2_CID_LINK_FREQ:
+		/* Read-only, nothing to apply. */
+		break;
+
+	case V4L2_CID_ILLUMINATORS_1:
+		ret = 0;
 		break;
 
 	case V4L2_CID_TEST_PATTERN:
@@ -2090,7 +4023,7 @@ static int mt9m114_ifp_init_state(struct v4l2_subdev *sd,
 
 	format->width = compose->width;
 	format->height = compose->height;
-	format->code = mt9m114_default_format_info(sensor)->code;
+	format->code = mt9m114_default_ifp_src_code(sensor);
 	format->field = V4L2_FIELD_NONE;
 	format->colorspace = V4L2_COLORSPACE_SRGB;
 	format->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
@@ -2119,6 +4052,14 @@ static int mt9m114_ifp_enum_mbus_code(struct v4l2_subdev *sd,
 		return 0;
 
 	case 1:
+		if (mt9m114_ifp_yuv_test_active(sensor)) {
+			if (code->index != 0)
+				return -EINVAL;
+
+			code->code = mt9m114_default_ifp_src_code(sensor);
+			return 0;
+		}
+
 		if (sensor->bus_cfg.bus_type == V4L2_MBUS_CSI2_DPHY)
 			flag = MT9M114_FMT_FLAG_CSI2;
 		else
@@ -2240,6 +4181,7 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 {
 	struct mt9m114 *sensor = ifp_to_mt9m114(sd);
 	struct v4l2_mbus_framefmt *format;
+	u32 requested_code = fmt->format.code;
 
 	format = v4l2_subdev_state_get_format(state, fmt->pad);
 
@@ -2254,11 +4196,23 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 
 		/* Propagate changes downstream. */
 		mt9m114_ifp_update_sel_and_src_fmt(state);
+
+		if (!sensor->ifp.set_fmt_trace_sink_logged) {
+			dev_info(&sensor->client->dev,
+				 "set_fmt trace: which=%s pad=0 req=%ux%u code=0x%04x -> applied=%ux%u code=0x%04x\n",
+				 fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE ? "ACTIVE" : "TRY",
+				 fmt->format.width, fmt->format.height, requested_code,
+				 format->width, format->height, format->code);
+			sensor->ifp.set_fmt_trace_sink_logged = true;
+		}
 	} else {
 		const struct mt9m114_format_info *info;
 
 		/* Only the media bus code can be changed on the source pad. */
-		info = mt9m114_format_info(sensor, 1, fmt->format.code);
+		if (mt9m114_ifp_yuv_test_active(sensor))
+			requested_code = mt9m114_default_ifp_src_code(sensor);
+
+		info = mt9m114_format_info(sensor, 1, requested_code);
 
 		/*
 		 * If the output format changes from/to RAW10 then the crop
@@ -2272,6 +4226,23 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 			mt9m114_ifp_update_sel_and_src_fmt(state);
 		} else {
 			format->code = info->code;
+		}
+
+		if (mt9m114_ifp_yuv_test_active(sensor) &&
+		    fmt->format.code != format->code)
+			dev_info_once(&sensor->client->dev,
+				      mt9m114_deep_lowlight_strict_ifp_yuv ?
+				      "deep-lowlight: strict-yuv overriding requested IFP source code 0x%04x -> 0x%04x\n" :
+				      "deep-lowlight: overriding requested IFP source code 0x%04x -> 0x%04x\n",
+				      fmt->format.code, format->code);
+
+		if (!sensor->ifp.set_fmt_trace_src_logged) {
+			dev_info(&sensor->client->dev,
+				 "set_fmt trace: which=%s pad=1 req_code=0x%04x -> applied_code=0x%04x size=%ux%u\n",
+				 fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE ? "ACTIVE" : "TRY",
+				 fmt->format.code, format->code,
+				 format->width, format->height);
+			sensor->ifp.set_fmt_trace_src_logged = true;
 		}
 	}
 
@@ -2506,9 +4477,15 @@ static int mt9m114_ifp_init(struct mt9m114 *sensor)
 		return ret;
 
 	sensor->ifp.frame_rate = MT9M114_DEF_FRAME_RATE;
+	sensor->ifp.ae_auto = true;
+	sensor->ifp.smart_metering_active_preset = MT9M114_METERING_PRESET_CENTER;
+	INIT_DELAYED_WORK(&sensor->ifp.smart_meter_work,
+			  mt9m114_smart_metering_work);
+	INIT_DELAYED_WORK(&sensor->ifp.deep_lowlight_work,
+			  mt9m114_deep_lowlight_work);
 
 	/* Initialize the control handler. */
-	v4l2_ctrl_handler_init(hdl, 8);
+	v4l2_ctrl_handler_init(hdl, 9);
 	v4l2_ctrl_new_std(hdl, &mt9m114_ifp_ctrl_ops,
 			  V4L2_CID_AUTO_WHITE_BALANCE,
 			  0, 1, 1, 1);
@@ -2516,6 +4493,9 @@ static int mt9m114_ifp_init(struct mt9m114 *sensor)
 			       V4L2_CID_EXPOSURE_AUTO,
 			       V4L2_EXPOSURE_MANUAL, 0,
 			       V4L2_EXPOSURE_AUTO);
+	v4l2_ctrl_new_std(hdl, &mt9m114_ifp_ctrl_ops,
+			  V4L2_CID_ILLUMINATORS_1,
+			  0, 1, 1, 0);
 
 	if (sensor->bus_cfg.nr_of_link_frequencies) {
 		link_freq = v4l2_ctrl_new_int_menu(hdl, &mt9m114_ifp_ctrl_ops,
@@ -2527,10 +4507,19 @@ static int mt9m114_ifp_init(struct mt9m114 *sensor)
 			link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	}
 
-	v4l2_ctrl_new_std(hdl, &mt9m114_ifp_ctrl_ops,
-			  V4L2_CID_PIXEL_RATE,
-			  sensor->pixrate, sensor->pixrate, 1,
-			  sensor->pixrate);
+	if (sensor->pa.vblank)
+		sensor->pa.vblank->flags |= V4L2_CTRL_FLAG_VOLATILE;
+
+	{
+		struct v4l2_ctrl *pixel_rate;
+
+		pixel_rate = v4l2_ctrl_new_std(hdl, &mt9m114_ifp_ctrl_ops,
+					 V4L2_CID_PIXEL_RATE,
+					 sensor->pixrate, sensor->pixrate, 1,
+					 sensor->pixrate);
+		if (pixel_rate)
+			pixel_rate->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	}
 
 	sensor->ifp.tpg[MT9M114_TPG_PATTERN] =
 		v4l2_ctrl_new_std_menu_items(hdl, &mt9m114_ifp_ctrl_ops,
@@ -2574,6 +4563,8 @@ error:
 
 static void mt9m114_ifp_cleanup(struct mt9m114 *sensor)
 {
+	cancel_delayed_work_sync(&sensor->ifp.smart_meter_work);
+	cancel_delayed_work_sync(&sensor->ifp.deep_lowlight_work);
 	v4l2_ctrl_handler_free(&sensor->ifp.hdl);
 	media_entity_cleanup(&sensor->ifp.sd.entity);
 }

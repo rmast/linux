@@ -387,13 +387,14 @@ static int __destroy_stream(struct atomisp_sub_device *asd,
 	}
 
 	if (stream_env->stream_state == CSS_STREAM_STARTED) {
-		timeout = jiffies + msecs_to_jiffies(200);
+		timeout = jiffies + msecs_to_jiffies(1000);
 		while (1) {
 			if (ia_css_stream_has_stopped(stream_env->stream))
 				break;
 
 			if (time_after(jiffies, timeout)) {
-				dev_warn(isp->dev, "stop stream timeout.\n");
+				dev_warn(isp->dev,
+					 "stop stream timeout after 1000ms, continuing teardown\n");
 				break;
 			}
 

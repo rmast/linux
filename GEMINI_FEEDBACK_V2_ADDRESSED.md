@@ -1,5 +1,8 @@
 # MT9M114 Low-Light v2 - Gemini Feedback Addressed
 
+> ⚠️ **Historisch document:** inhoud is waardevolle achtergrond, maar kan deels verouderd zijn.
+> Voor de actuele status en het consistente hoofdverhaal, gebruik **README.md** en **CHANGELOG.md**.
+
 ## Samenvatting van Gemini's Aandachtspunten
 
 **Datum:** 15 februari 2026  

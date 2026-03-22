@@ -1,5 +1,8 @@
 # MT9M114 v2 Patch - Changes from v1
 
+> ⚠️ **Historisch document:** inhoud is waardevolle achtergrond, maar kan deels verouderd zijn.
+> Voor de actuele status en het consistente hoofdverhaal, gebruik **README.md** en **CHANGELOG.md**.
+
 ## Executive Summary
 
 **v2 Status:** ✅ Production-ready  

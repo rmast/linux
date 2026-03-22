@@ -1,5 +1,8 @@
 # MT9M114 v2 Patch - Handmatig toegepast op 6.19-rc7
 
+> ⚠️ **Historisch document:** inhoud is waardevolle achtergrond, maar kan deels verouderd zijn.
+> Voor de actuele status en het consistente hoofdverhaal, gebruik **README.md** en **CHANGELOG.md**.
+
 ## Status: ✅ SUCCESVOL GECOMPILEERD
 
 De patch is succesvol toegepast op jouw Linux 6.19-rc7 kernel en compileert zonder errors.

@@ -1,5 +1,8 @@
 # MT9M114 v2 - Extra Technische Waarschuwingen (Gemini Review)
 
+> ⚠️ **Historisch document:** inhoud is waardevolle achtergrond, maar kan deels verouderd zijn.
+> Voor de actuele status en het consistente hoofdverhaal, gebruik **README.md** en **CHANGELOG.md**.
+
 ## 🚨 CRITICAL: VTS Margin Rule (Hardware Bug)
 
 **THE MOST IMPORTANT RULE FOR MT9M114:**

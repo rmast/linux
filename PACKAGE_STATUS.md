@@ -1,5 +1,8 @@
 # MT9M114 Low-Light Patch Package - Final Status
 
+> ⚠️ **Historisch document:** inhoud is waardevolle achtergrond, maar kan deels verouderd zijn.
+> Voor de actuele status en het consistente hoofdverhaal, gebruik **README.md** en **CHANGELOG.md**.
+
 **Date:** 15 februari 2026  
 **Version:** v2 (Production-Ready)  
 **Target:** Linux Kernel 6.19-rc7  

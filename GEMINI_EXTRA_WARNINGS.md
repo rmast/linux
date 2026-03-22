@@ -1,5 +1,8 @@
 # Gemini's Extra Technische Waarschuwingen - Implementatie Status
 
+> ⚠️ **Historisch document:** inhoud is waardevolle achtergrond, maar kan deels verouderd zijn.
+> Voor de actuele status en het consistente hoofdverhaal, gebruik **README.md** en **CHANGELOG.md**.
+
 ## Samenvatting Nieuwe Feedback (Correcte Versie)
 
 **Datum:** 15 februari 2026  

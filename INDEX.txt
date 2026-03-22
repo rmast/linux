@@ -5,6 +5,9 @@
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 
+⚠️ HISTORISCH DOCUMENT: deze index is vooral achtergrond en kan deels verouderd zijn.
+Voor actuele status en consistente samenvatting: zie README.md en CHANGELOG.md.
+
 📦 PACKAGE CONTENTS
 ═══════════════════════════════════════════════════════════════════════
 

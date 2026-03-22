@@ -1,6 +1,9 @@
 # MT9M114 Low-Light Enhancement Patch Analysis
 ## For Asus T100 (Intel Bay Trail) - Linux 6.19-rc7
 
+> ⚠️ **Historisch document:** inhoud is waardevolle achtergrond, maar kan deels verouderd zijn.
+> Voor de actuele status en het consistente hoofdverhaal, gebruik **README.md** en **CHANGELOG.md**.
+
 ### Executive Summary
 
 This patch restores production-grade low-light performance to the MT9M114 camera sensor driver by implementing features that existed in the android-ia vendor kernel but were lost during the mainline rewrite.

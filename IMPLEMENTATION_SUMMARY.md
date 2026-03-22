@@ -1,5 +1,8 @@
 # MT9M114 Low-Light Enhancement - Implementation Summary
 
+> ⚠️ **Historisch document:** inhoud is waardevolle achtergrond, maar kan deels verouderd zijn.
+> Voor de actuele status en het consistente hoofdverhaal, gebruik **README.md** en **CHANGELOG.md**.
+
 ## Overview
 
 Successfully implemented a production-grade patch for the MT9M114 sensor driver (Linux 6.19-rc7) that restores low-light performance features from the android-ia vendor kernel.

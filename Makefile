@@ -1078,7 +1078,7 @@ ifneq ($(CONFIG_FUNCTION_ALIGNMENT),0)
 # -fmin-function-alignment if it is available, or fall back to -falign-funtions.
 # See also CONFIG_CC_HAS_SANE_FUNCTION_ALIGNMENT.
 ifdef CONFIG_CC_HAS_MIN_FUNCTION_ALIGNMENT
-KBUILD_CFLAGS += -fmin-function-alignment=$(CONFIG_FUNCTION_ALIGNMENT)
+# KBUILD_CFLAGS += -fmin-function-alignment=$(CONFIG_FUNCTION_ALIGNMENT)
 else
 KBUILD_CFLAGS += -falign-functions=$(CONFIG_FUNCTION_ALIGNMENT)
 endif

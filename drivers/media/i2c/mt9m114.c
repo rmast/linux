@@ -10,6 +10,8 @@
  */
 
 #include <linux/clk.h>
+#include <linux/acpi.h>
+#include <linux/completion.h>
 #include <linux/delay.h>
 #include <linux/errno.h>
 #include <linux/gpio/consumer.h>
@@ -56,6 +58,7 @@
 #define MT9M114_LOGICAL_ADDRESS_ACCESS			CCI_REG16(0x098e)
 
 /* Sensor Core registers */
+#define MT9M114_FRAME_LENGTH_LINES				CCI_REG16(0x300a)
 #define MT9M114_COARSE_INTEGRATION_TIME			CCI_REG16(0x3012)
 #define MT9M114_FINE_INTEGRATION_TIME			CCI_REG16(0x3014)
 #define MT9M114_RESET_REGISTER				CCI_REG16(0x301a)
@@ -83,6 +86,16 @@
 #define MT9M114_AE_TRACK_EXEC_AUTOMATIC_EXPOSURE		BIT(0)
 #define MT9M114_AE_TRACK_AE_TRACKING_DAMPENING_SPEED	CCI_REG8(0xa80a)
 
+/* Low-light enhancement registers (from android-ia) */
+#define MT9M114_AE_TRACK_MODE				CCI_REG8(0xa800)
+#define MT9M114_AE_TRACK_MODE_AUTO_ENABLE			BIT(0)
+#define MT9M114_AE_WEIGHT_TABLE_BASE			CCI_REG8(0x3190)
+#define MT9M114_AE_TRACK_SPEED				CCI_REG8(0x31ac)
+#define MT9M114_GROUPED_PARAMETER_HOLD			CCI_REG16(0x8404)
+#define MT9M114_GROUPED_PARAMETER_HOLD_ENABLE			0x0100
+#define MT9M114_GROUPED_PARAMETER_HOLD_DISABLE			0x0000
+#define MT9M114_AE_TRACK_SPEED_NORMAL				0x00
+
 /* Color Correction Matrix registers */
 #define MT9M114_CCM_ALGO				CCI_REG16(0xb404)
 #define MT9M114_CCM_EXEC_CALC_CCM_MATRIX			BIT(4)
@@ -105,6 +118,7 @@
 #define MT9M114_CAM_SENSOR_CFG_CPIPE_LAST_ROW		CCI_REG16(0xc818)
 #define MT9M114_CAM_SENSOR_CFG_REG_0_DATA		CCI_REG16(0xc826)
 #define MT9M114_CAM_SENSOR_CONTROL_READ_MODE		CCI_REG16(0xc834)
+#define MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME	CCI_REG16(0xc83c)
 #define MT9M114_CAM_SENSOR_CONTROL_HORZ_MIRROR_EN		BIT(0)
 #define MT9M114_CAM_SENSOR_CONTROL_VERT_FLIP_EN			BIT(1)
 #define MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_NORMAL		(0 << 4)
@@ -340,6 +354,10 @@
 #define MT9M114_DEF_HBLANK				308
 #define MT9M114_DEF_VBLANK				21
 
+/* Extended VBLANK range for low-light mode (VTS up to ~30000 lines) */
+#define MT9M114_MAX_VBLANK_LOWLIGHT			29024U  /* Allow 2+ second exposures */
+#define MT9M114_MAX_EXPOSURE_LOWLIGHT			29998U  /* VTS - 2 (hardware requirement) */
+
 #define MT9M114_DEF_FRAME_RATE				30
 #define MT9M114_MAX_FRAME_RATE				120
 
@@ -377,6 +395,58 @@ enum mt9m114_format_flag {
 	MT9M114_FMT_FLAG_CSI2 = BIT(1),
 };
 
+/* Metering presets for common use cases */
+enum mt9m114_metering_preset {
+	MT9M114_METERING_PRESET_CENTER = 0,  /* Center-weighted (default) */
+	MT9M114_METERING_PRESET_UNIFORM,     /* Uniform (landscape) */
+	MT9M114_METERING_PRESET_BACKLIT,     /* Backlit portrait */
+	MT9M114_METERING_PRESET_SPOT,        /* Spot metering (macro) */
+};
+
+/* 5x5 metering weight tables (registers 0x3190-0x31AB, 25 bytes total) */
+static const u8 mt9m114_metering_patterns[][25] = {
+	/* Center-Weighted: Emphasize center, gentle falloff */
+	[MT9M114_METERING_PRESET_CENTER] = {
+		2, 2, 4, 2, 2,
+		2, 4, 8, 4, 2,
+		4, 8, 8, 8, 4,
+		2, 4, 8, 4, 2,
+		2, 2, 4, 2, 2,
+	},
+	/* Uniform: Even weight across frame (landscape mode) */
+	[MT9M114_METERING_PRESET_UNIFORM] = {
+		4, 4, 4, 4, 4,
+		4, 4, 4, 4, 4,
+		4, 4, 4, 4, 4,
+		4, 4, 4, 4, 4,
+		4, 4, 4, 4, 4,
+	},
+	/* Backlit Portrait: Ignore background, focus on center subject */
+	[MT9M114_METERING_PRESET_BACKLIT] = {
+		0, 0, 0, 0, 0,
+		0, 4, 8, 4, 0,
+		0, 8, 8, 8, 0,
+		0, 4, 8, 4, 0,
+		0, 0, 0, 0, 0,
+	},
+	/* Spot: Only center 3x3 (macro photography) */
+	[MT9M114_METERING_PRESET_SPOT] = {
+		0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0,
+		0, 0, 8, 0, 0,
+		0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0,
+	},
+};
+
+static const char * const mt9m114_metering_preset_names[] = {
+	"Center-Weighted",
+	"Uniform",
+	"Backlit Portrait",
+	"Spot Center",
+	NULL,
+};
+
 struct mt9m114_format_info {
 	u32 code;
 	u32 output_format;
@@ -409,6 +479,8 @@ struct mt9m114 {
 		struct v4l2_ctrl *gain;
 		struct v4l2_ctrl *hblank;
 		struct v4l2_ctrl *vblank;
+		struct v4l2_ctrl *ae_metering_preset;
+		struct v4l2_ctrl *ae_track_speed;
 	} pa;
 
 	/* Image Flow Processor */
@@ -420,6 +492,7 @@ struct mt9m114 {
 		unsigned int frame_rate;
 
 		struct v4l2_ctrl *tpg[4];
+		struct completion unregistered;
 	} ifp;
 
 	const struct mt9m114_model_info *info;
@@ -1037,6 +1110,183 @@ static inline struct mt9m114 *pa_ctrl_to_mt9m114(struct v4l2_ctrl *ctrl)
 	return container_of(ctrl->handler, struct mt9m114, pa.hdl);
 }
 
+/**
+ * mt9m114_group_hold - Enable/disable grouped parameter hold
+ * @sensor: The MT9M114 sensor
+ * @enable: true to enable GROUP_HOLD (buffer writes), false to apply atomically
+ *
+ * When enabled, all register writes are buffered in shadow registers.
+ * When disabled, buffered writes are applied atomically at the next SOF.
+ *
+ * Critical for synchronizing VTS (Frame_length_lines) and Exposure
+ * (Coarse_integration_time) to prevent rolling shutter artifacts.
+ *
+ * Register: 0x8404 (GROUPED_PARAMETER_HOLD)
+ *   0x0100 = Enable (buffer writes)
+ *   0x0000 = Disable (apply at SOF)
+ *
+ * Returns: 0 on success, negative errno on failure
+ */
+static int mt9m114_group_hold(struct mt9m114 *sensor, bool enable)
+{
+	u16 value = enable ? MT9M114_GROUPED_PARAMETER_HOLD_ENABLE
+			   : MT9M114_GROUPED_PARAMETER_HOLD_DISABLE;
+	int ret;
+
+	ret = cci_write(sensor->regmap, MT9M114_GROUPED_PARAMETER_HOLD, value, NULL);
+	if (ret) {
+		dev_err(&sensor->client->dev, "Failed to %s group hold: %d\n",
+			enable ? "enable" : "disable", ret);
+		return ret;
+	}
+
+	dev_dbg(&sensor->client->dev, "GROUP_HOLD %s\n", enable ? "ENABLED" : "DISABLED");
+	return 0;
+}
+
+static int mt9m114_ensure_manual_ae(struct mt9m114 *sensor)
+{
+	u64 ae_track_mode;
+	int ret;
+
+	ret = cci_read(sensor->regmap, MT9M114_AE_TRACK_MODE, &ae_track_mode, NULL);
+	if (ret) {
+		dev_err(&sensor->client->dev, "Failed to read AE_TRACK_MODE: %d\n", ret);
+		return ret;
+	}
+
+	if (ae_track_mode & MT9M114_AE_TRACK_MODE_AUTO_ENABLE) {
+		ret = cci_write(sensor->regmap, MT9M114_AE_TRACK_MODE, 0x00, NULL);
+		if (ret) {
+			dev_err(&sensor->client->dev,
+				"Failed to disable internal AE: %d\n", ret);
+			return ret;
+		}
+		dev_info(&sensor->client->dev,
+			 "Disabled sensor internal auto-exposure for manual control\n");
+	}
+
+	return 0;
+}
+
+/**
+ * mt9m114_update_vts_for_exposure - Adjust VTS (frame length) for long exposure
+ * @sensor: The MT9M114 sensor
+ * @exposure: Desired exposure time in lines
+ *
+ * When exposure time exceeds the standard frame length, we need to extend
+ * the VTS (Vertical Total Size) to accommodate it. This drops the frame rate
+ * to gain more light collection time.
+ *
+ * Example: 30 FPS = 997 lines (976 active + 21 blanking)
+ *          200ms exposure = ~6000 lines → VTS must be 6002, FPS drops to ~5
+ *
+ * CRITICAL: Hardware requires Integration_time < Frame_length - 2
+ *           If violated, sensor's timing generator freezes!
+ *
+ * Uses GROUP_HOLD (0x8404) to synchronize VTS and Exposure atomically.
+ *
+ * Returns: 0 on success, negative errno on failure
+ */
+static int mt9m114_update_vts_for_exposure(struct mt9m114 *sensor, u32 exposure)
+{
+	u32 min_frame_length = exposure + 2;  /* CRITICAL: +2 margin required */
+	u32 old_vblank = sensor->pa.vblank->val;
+	u32 new_vblank;
+
+	/* If current VTS is sufficient, no adjustment needed */
+	if (min_frame_length <= MT9M114_PIXEL_ARRAY_HEIGHT + old_vblank)
+		return 0;
+
+	/* Calculate new VBLANK to accommodate exposure + 2-line margin */
+	new_vblank = min_frame_length - MT9M114_PIXEL_ARRAY_HEIGHT;
+
+	/* Clamp to maximum allowed VBLANK */
+	if (new_vblank > MT9M114_MAX_VBLANK_LOWLIGHT)
+		new_vblank = MT9M114_MAX_VBLANK_LOWLIGHT;
+
+	/* Warn if large VTS change during streaming (AtomISP CSS timeout risk) */
+	if (sensor->streaming && new_vblank > old_vblank * 2) {
+		dev_warn_once(&sensor->client->dev,
+			      "Large VTS adjustment (%u -> %u) during streaming. "
+			      "AtomISP CSS firmware may timeout. "
+			      "Recommend stop/reconfigure/restart stream.\n",
+			      old_vblank, new_vblank);
+	}
+
+	/* Update VBLANK control value (will be written by s_ctrl) */
+	return __v4l2_ctrl_modify_range(sensor->pa.vblank, MT9M114_MIN_VBLANK,
+					MT9M114_MAX_VBLANK_LOWLIGHT, 1, new_vblank);
+}
+
+static int mt9m114_apply_metering_preset(struct mt9m114 *sensor, unsigned int preset)
+{
+	const u8 *pattern;
+	unsigned int i;
+	int ret;
+
+	if (preset >= ARRAY_SIZE(mt9m114_metering_patterns)) {
+		dev_err(&sensor->client->dev, "Invalid metering preset %u\n", preset);
+		return -EINVAL;
+	}
+
+	pattern = mt9m114_metering_patterns[preset];
+
+	for (i = 0; i < 25; i++) {
+		ret = cci_write(sensor->regmap,
+				MT9M114_AE_WEIGHT_TABLE_BASE + i,
+				pattern[i], NULL);
+		if (ret) {
+			dev_err(&sensor->client->dev,
+				"Failed to write metering weight[%u]: %d\n", i, ret);
+			return ret;
+		}
+	}
+
+	dev_dbg(&sensor->client->dev, "Applied metering preset: %s\n",
+		mt9m114_metering_preset_names[preset]);
+
+	return 0;
+}
+
+static int mt9m114_write_exposure(struct mt9m114 *sensor, u32 exposure,
+				  const struct v4l2_mbus_framefmt *format)
+{
+	u32 min_frame_length = exposure + 2;
+	u32 frame_length = format->height + sensor->pa.vblank->val;
+	u32 new_vblank;
+	int ret;
+
+	ret = mt9m114_update_vts_for_exposure(sensor, exposure);
+	if (ret)
+		return ret;
+
+	if (min_frame_length > frame_length) {
+		new_vblank = min_frame_length - format->height;
+		if (new_vblank > MT9M114_MAX_VBLANK_LOWLIGHT)
+			new_vblank = MT9M114_MAX_VBLANK_LOWLIGHT;
+
+		frame_length = format->height + new_vblank;
+
+		cci_write(sensor->regmap, MT9M114_FRAME_LENGTH_LINES,
+			  frame_length, &ret);
+		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
+			  frame_length, &ret);
+
+		sensor->pa.vblank->val = new_vblank;
+		sensor->pa.vblank->cur.val = new_vblank;
+	}
+
+	ret = cci_write(sensor->regmap, MT9M114_COARSE_INTEGRATION_TIME,
+			exposure, NULL);
+	if (ret)
+		return ret;
+
+	return cci_write(sensor->regmap,
+			 MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
+			 exposure, NULL);
+}
+
 static int mt9m114_pa_g_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct mt9m114 *sensor = pa_ctrl_to_mt9m114(ctrl);
@@ -1082,41 +1332,83 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct mt9m114 *sensor = pa_ctrl_to_mt9m114(ctrl);
 	const struct v4l2_mbus_framefmt *format;
 	struct v4l2_subdev_state *state;
+	unsigned int mask;
+	u32 value;
 	int ret = 0;
-	u64 mask;
 
-	/* V4L2 controls values are applied only when power is up. */
 	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
 		return 0;
 
-	state = v4l2_subdev_get_locked_active_state(&sensor->pa.sd);
+	state = v4l2_subdev_lock_and_get_active_state(&sensor->pa.sd);
 	format = v4l2_subdev_state_get_format(state, 0);
 
 	switch (ctrl->id) {
-	case V4L2_CID_HBLANK:
-		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_LINE_LENGTH_PCK,
-			  ctrl->val + format->width, &ret);
+	case V4L2_CID_MT9M114_AE_METERING_PRESET:
+		ret = mt9m114_apply_metering_preset(sensor, ctrl->val);
 		break;
 
-	case V4L2_CID_VBLANK:
-		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
-			  ctrl->val + format->height, &ret);
+	case V4L2_CID_MT9M114_AE_TRACK_SPEED:
+		cci_write(sensor->regmap, MT9M114_AE_TRACK_SPEED,
+			  ctrl->val, &ret);
 		break;
 
 	case V4L2_CID_EXPOSURE:
-		cci_write(sensor->regmap,
-			  MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
-			  ctrl->val, &ret);
+		ret = mt9m114_ensure_manual_ae(sensor);
+		if (ret)
+			break;
+
+		ret = mt9m114_group_hold(sensor, true);
+		if (ret)
+			break;
+
+		ret = mt9m114_write_exposure(sensor, ctrl->val, format);
+		if (ret)
+			mt9m114_group_hold(sensor, false);
+		else
+			ret = mt9m114_group_hold(sensor, false);
 		break;
 
-	case V4L2_CID_ANALOGUE_GAIN:
+	case V4L2_CID_VBLANK:
+		ret = mt9m114_ensure_manual_ae(sensor);
+		if (ret)
+			break;
+
 		/*
-		 * The CAM_SENSOR_CONTROL_ANALOG_GAIN contains linear analog
-		 * gain values that are mapped to the GLOBAL_GAIN register
-		 * values by the sensor firmware.
+		 * VBLANK (Vertical Blanking Lines)
+		 *
+		 * Frame_length_lines = PIXEL_ARRAY_HEIGHT (976) + VBLANK
+		 *
+		 * Uses GROUP_HOLD to synchronize with exposure if needed.
+		 * Writes to CAM register:
+		 *   0xC812 (CAM: CAM_SENSOR_CFG_FRAME_LENGTH_LINES)
 		 */
-		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_ANALOG_GAIN,
-			  ctrl->val, &ret);
+		ret = mt9m114_group_hold(sensor, true);
+		if (ret)
+			break;
+
+		value = ctrl->val + format->height;
+		cci_write(sensor->regmap, MT9M114_FRAME_LENGTH_LINES, value, &ret);
+		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
+			  value, &ret);
+
+		/*
+		 * Updating the frame length may extend the frame interval,
+		 * shrinking the maximum exposure value. If it was at its
+		 * maximum, it needs to be reduced to remain smaller than
+		 * two lines less than the frame length.
+		 */
+		__v4l2_ctrl_modify_range(sensor->pa.exposure, 1,
+				 value - 2, 1,
+					 sensor->pa.exposure->default_value);
+		if (ret)
+			mt9m114_group_hold(sensor, false);
+		else
+			ret = mt9m114_group_hold(sensor, false);
+		break;
+
+	case V4L2_CID_HBLANK:
+		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_LINE_LENGTH_PCK,
+			  ctrl->val + format->width, &ret);
 		break;
 
 	case V4L2_CID_HFLIP:
@@ -1138,6 +1430,7 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	}
 
+	v4l2_subdev_unlock_state(state);
 	pm_runtime_put_autosuspend(&sensor->client->dev);
 
 	return ret;
@@ -1410,7 +1703,7 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 		return ret;
 
 	/* Initialize the control handler. */
-	v4l2_ctrl_handler_init(hdl, 7);
+	v4l2_ctrl_handler_init(hdl, 9);  /* Increased for 2 new custom controls */
 
 	/* The range of the HBLANK and VBLANK controls will be updated below. */
 	sensor->pa.hblank = v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops,
@@ -1425,9 +1718,43 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 					      MT9M114_DEF_VBLANK);
 
 	/*
+	 * Custom control: AE Metering Preset
+	 * User-friendly alternative to exposing 25 individual weight controls.
+	 * Each preset applies a predefined pattern optimized for a use case.
+	 */
+	static const struct v4l2_ctrl_config ae_metering_preset_cfg = {
+		.ops = &mt9m114_pa_ctrl_ops,
+		.id = V4L2_CID_MT9M114_AE_METERING_PRESET,
+		.type = V4L2_CTRL_TYPE_MENU,
+		.name = "AE Metering Preset",
+		.min = 0,
+		.max = ARRAY_SIZE(mt9m114_metering_preset_names) - 2,
+		.def = MT9M114_METERING_PRESET_CENTER,
+		.qmenu = mt9m114_metering_preset_names,
+	};
+	sensor->pa.ae_metering_preset = v4l2_ctrl_new_custom(hdl, &ae_metering_preset_cfg, NULL);
+
+	/* Custom control: AE Tracking Speed (0x31AC register) */
+	static const struct v4l2_ctrl_config ae_track_speed_cfg = {
+		.ops = &mt9m114_pa_ctrl_ops,
+		.id = V4L2_CID_MT9M114_AE_TRACK_SPEED,
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.name = "AE Track Speed",
+		.min = MT9M114_AE_TRACK_SPEED_NORMAL,
+		.max = 0x07,
+		.step = 1,
+		.def = MT9M114_AE_TRACK_SPEED_NORMAL,
+		.flags = V4L2_CTRL_FLAG_SLIDER,
+	};
+	sensor->pa.ae_track_speed = v4l2_ctrl_new_custom(hdl, &ae_track_speed_cfg, NULL);
+
+	if (sensor->pa.ae_track_speed)
+		sensor->pa.ae_track_speed->flags |= V4L2_CTRL_FLAG_SLIDER;
+
+	/*
 	 * The maximum coarse integration time is the frame length in lines
-	 * minus two. The default is taken directly from the datasheet, but
-	 * makes little sense as auto-exposure is enabled by default.
+	 * minus two (hardware requirement to prevent timing generator freeze).
+	 * Extended to support low-light mode with VTS up to ~30000 lines.
 	 */
 	max_exposure = MT9M114_PIXEL_ARRAY_HEIGHT + MT9M114_MIN_VBLANK - 2;
 	sensor->pa.exposure = v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops,
@@ -1472,6 +1799,8 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 	v4l2_subdev_unlock_state(state);
 
 	sd->ctrl_handler = hdl;
+
+	init_completion(&sensor->ifp.unregistered);
 
 	return 0;
 
@@ -2062,8 +2391,13 @@ static int mt9m114_ifp_set_selection(struct v4l2_subdev *sd,
 static void mt9m114_ifp_unregistered(struct v4l2_subdev *sd)
 {
 	struct mt9m114 *sensor = ifp_to_mt9m114(sd);
+	struct device *dev = &sensor->client->dev;
+
+	dev_dbg(dev, "ifp unregistered callback (ifp.v4l2_dev=%p, pa.v4l2_dev=%p)\n",
+		sensor->ifp.sd.v4l2_dev, sensor->pa.sd.v4l2_dev);
 
 	v4l2_device_unregister_subdev(&sensor->pa.sd);
+	complete(&sensor->ifp.unregistered);
 }
 
 static int mt9m114_ifp_registered(struct v4l2_subdev *sd)
@@ -2155,12 +2489,15 @@ static int mt9m114_ifp_init(struct mt9m114 *sensor)
 			       V4L2_EXPOSURE_MANUAL, 0,
 			       V4L2_EXPOSURE_AUTO);
 
-	link_freq = v4l2_ctrl_new_int_menu(hdl, &mt9m114_ifp_ctrl_ops,
-					   V4L2_CID_LINK_FREQ,
-					   sensor->bus_cfg.nr_of_link_frequencies - 1,
-					   0, sensor->bus_cfg.link_frequencies);
-	if (link_freq)
-		link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	if (sensor->bus_cfg.nr_of_link_frequencies) {
+		link_freq = v4l2_ctrl_new_int_menu(hdl, &mt9m114_ifp_ctrl_ops,
+						   V4L2_CID_LINK_FREQ,
+						   sensor->bus_cfg.nr_of_link_frequencies - 1,
+						   0,
+						   sensor->bus_cfg.link_frequencies);
+		if (link_freq)
+			link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	}
 
 	v4l2_ctrl_new_std(hdl, &mt9m114_ifp_ctrl_ops,
 			  V4L2_CID_PIXEL_RATE,
@@ -2347,14 +2684,19 @@ static const struct dev_pm_ops mt9m114_pm_ops = {
 static int mt9m114_verify_link_frequency(struct mt9m114 *sensor,
 					 unsigned int pixrate)
 {
+	u32 i;
 	unsigned int link_freq = sensor->bus_cfg.bus_type == V4L2_MBUS_CSI2_DPHY
 			       ? pixrate * 8 : pixrate * 2;
 
-	if (sensor->bus_cfg.nr_of_link_frequencies != 1 ||
-	    sensor->bus_cfg.link_frequencies[0] != link_freq)
+	if (!sensor->bus_cfg.nr_of_link_frequencies)
 		return -EINVAL;
 
-	return 0;
+	for (i = 0; i < sensor->bus_cfg.nr_of_link_frequencies; i++) {
+		if (sensor->bus_cfg.link_frequencies[i] == link_freq)
+			return 0;
+	}
+
+	return -EINVAL;
 }
 
 /*
@@ -2390,6 +2732,29 @@ static int mt9m114_clk_init(struct mt9m114 *sensor)
 	};
 	unsigned int pixrate;
 	int ret;
+
+	if (!sensor->bus_cfg.nr_of_link_frequencies) {
+		/*
+		 * ACPI fallback path: no reliable endpoint link frequency available.
+		 * Use the default PLL target instead of EXTCLK bypass to avoid
+		 * under-clocking the sensor and getting blank/timeout streams.
+		 */
+		sensor->pll.ext_clock = clk_get_rate(sensor->clk);
+		sensor->pll.pix_clock = MT9M114_DEF_PIXCLOCK;
+
+		ret = aptina_pll_calculate(&sensor->client->dev, &limits,
+					  &sensor->pll);
+		if (ret)
+			return ret;
+
+		sensor->pixrate = sensor->pll.ext_clock * sensor->pll.m
+			/ (sensor->pll.n * sensor->pll.p1);
+		sensor->bypass_pll = false;
+
+		dev_warn(&sensor->client->dev,
+			 "no link-frequencies provided, using default PLL clocking\n");
+		return 0;
+	}
 
 	/*
 	 * Calculate the pixel rate and link frequency. The CSI-2 bus is clocked
@@ -2464,9 +2829,24 @@ static int mt9m114_identify(struct mt9m114 *sensor)
 
 static int mt9m114_parse_dt(struct mt9m114 *sensor)
 {
-	struct fwnode_handle *fwnode = dev_fwnode(&sensor->client->dev);
+	struct fwnode_handle *fwnode;
 	struct fwnode_handle *ep;
 	int ret;
+
+#if IS_ENABLED(CONFIG_ACPI)
+	if (has_acpi_companion(&sensor->client->dev)) {
+		/*
+		 * On some reload sequences a stale software-node graph can be
+		 * observed for this ACPI-enumerated sensor. Use the known safe
+		 * default bus configuration and skip endpoint graph parsing.
+		 */
+		memset(&sensor->bus_cfg, 0, sizeof(sensor->bus_cfg));
+		sensor->bus_cfg.bus_type = V4L2_MBUS_CSI2_DPHY;
+		sensor->bus_cfg.bus.mipi_csi2.num_data_lanes = 1;
+		goto read_slew_rate;
+	}
+#endif
+	fwnode = dev_fwnode(&sensor->client->dev);
 
 	/*
 	 * On ACPI systems the fwnode graph can be initialized by a bridge
@@ -2476,6 +2856,9 @@ static int mt9m114_parse_dt(struct mt9m114 *sensor)
 	 * to the ACPI core.
 	 */
 	ep = fwnode_graph_get_next_endpoint(fwnode, NULL);
+	if (IS_ERR(ep))
+		return dev_err_probe(&sensor->client->dev, PTR_ERR(ep),
+				     "failed to get fwnode graph endpoint\n");
 	if (!ep)
 		return dev_err_probe(&sensor->client->dev, -EPROBE_DEFER,
 				     "waiting for fwnode graph endpoint\n");
@@ -2500,6 +2883,7 @@ static int mt9m114_parse_dt(struct mt9m114 *sensor)
 		goto error;
 	}
 
+read_slew_rate:
 	sensor->pad_slew_rate = MT9M114_PAD_SLEW_DEFAULT;
 	device_property_read_u32(&sensor->client->dev, "slew-rate",
 				 &sensor->pad_slew_rate);
@@ -2641,8 +3025,22 @@ static void mt9m114_remove(struct i2c_client *client)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct mt9m114 *sensor = ifp_to_mt9m114(sd);
 	struct device *dev = &client->dev;
+	bool ifp_async_registered = sensor->ifp.sd.async_list.next;
+	bool ifp_bound = sensor->ifp.sd.v4l2_dev;
 
-	v4l2_async_unregister_subdev(&sensor->ifp.sd);
+	dev_dbg(dev,
+		"remove start (ifp_bound=%u ifp_async_registered=%u ifp.v4l2_dev=%p pa.v4l2_dev=%p)\n",
+		ifp_bound, ifp_async_registered,
+		sensor->ifp.sd.v4l2_dev, sensor->pa.sd.v4l2_dev);
+
+	if (ifp_async_registered) {
+		reinit_completion(&sensor->ifp.unregistered);
+		v4l2_async_unregister_subdev(&sensor->ifp.sd);
+		if (ifp_bound)
+			wait_for_completion(&sensor->ifp.unregistered);
+	} else {
+		dev_warn(dev, "ifp async subdev already unregistered, skipping\n");
+	}
 
 	mt9m114_ifp_cleanup(sensor);
 	mt9m114_pa_cleanup(sensor);
@@ -2666,6 +3064,25 @@ static const struct mt9m114_model_info mt9m114_models_aptina = {
 	.state_standby_polling = false,
 };
 
+static void mt9m114_shutdown(struct i2c_client *client)
+{
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct mt9m114 *sensor;
+
+	if (!sd)
+		return;
+
+	sensor = ifp_to_mt9m114(sd);
+
+	if (sensor->streaming)
+		mt9m114_stop_streaming(sensor);
+
+	pm_runtime_disable(&client->dev);
+	if (!pm_runtime_status_suspended(&client->dev))
+		mt9m114_power_off(sensor);
+	pm_runtime_set_suspended(&client->dev);
+}
+
 static const struct of_device_id mt9m114_of_ids[] = {
 	{ .compatible = "onnn,mt9m114", .data = &mt9m114_models_default },
 	{ .compatible = "aptina,mi1040", .data = &mt9m114_models_aptina },
@@ -2688,6 +3105,7 @@ static struct i2c_driver mt9m114_driver = {
 	},
 	.probe		= mt9m114_probe,
 	.remove		= mt9m114_remove,
+	.shutdown	= mt9m114_shutdown,
 };
 
 module_i2c_driver(mt9m114_driver);

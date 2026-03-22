@@ -15,7 +15,7 @@
 #include <linux/kfifo.h>
 #include <linux/pm_runtime.h>
 #include <linux/timer.h>
-
+#include <linux/types.h>       // For u32, uint8_t
 #include <asm/iosf_mbi.h>
 
 #include <media/v4l2-event.h>
@@ -1171,8 +1171,7 @@ int atomisp_gdc_cac(struct atomisp_sub_device *asd, int flag,
 /*
  * Function to enable/disable low light mode including ANR
  */
-int atomisp_low_light(struct atomisp_sub_device *asd, int flag,
-		      __s32 *value)
+int atomisp_low_light(struct atomisp_sub_device *asd, int flag, __s32 *value)
 {
 	if (flag == 0) {
 		*value = asd->params.low_light;
@@ -4038,7 +4037,8 @@ static int atomisp_set_fmt_to_isp(struct video_device *vdev,
 {
 	struct camera_mipi_info *mipi_info;
 	struct atomisp_device *isp = video_get_drvdata(vdev);
-	struct atomisp_sub_device *asd = atomisp_to_video_pipe(vdev)->asd;
+	struct atomisp_video_pipe *pipe = atomisp_to_video_pipe(vdev);
+	struct atomisp_sub_device *asd = pipe->asd;
 	struct atomisp_input_subdev *input = &isp->inputs[asd->input_curr];
 	const struct atomisp_format_bridge *format;
 	struct v4l2_rect *isp_sink_crop;

@@ -39,7 +39,6 @@
 *.mod.c
 *.o
 *.o.*
-*.patch
 *.pyc
 *.rlib
 *.rmeta

@@ -1347,6 +1347,7 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 	struct mt9m114 *sensor = container_of(sd, struct mt9m114, pa.sd);
 	struct v4l2_subdev_state *state;
 	const struct v4l2_mbus_framefmt *format;
+	u64 read_mode = 0;
 	u32 requested_gain;
 	u32 requested_exposure;
 	u32 frame_length;
@@ -1408,6 +1409,12 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 			    MT9M114_MIN_VBLANK, MT9M114_MAX_VBLANK_LOWLIGHT);
 	hw_gain = lowlight ? max_t(u32, requested_gain >> 2, 1) : requested_gain;
 
+	dev_info(&sensor->client->dev,
+		 "mt9m114 exposure apply: requested_gain=%u requested_exposure=%u "
+		 "computed_vblank=%u target_frame_length=%u lowlight=%u hw_gain=0x%04x\n",
+		 requested_gain, requested_exposure, hw_vblank, target_frame_length,
+		 lowlight, hw_gain);
+
 	ret = mt9m114_ensure_manual_ae(sensor);
 	if (ret)
 		return ret;
@@ -1444,6 +1451,15 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 	if (ret)
 		goto out_group_hold;
 
+	ret = cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
+		       &read_mode, NULL);
+	if (!ret)
+		dev_info(&sensor->client->dev,
+			 "mt9m114 read_mode: 0x%04llx x=%u y=%u (expect 3/3 for summing)\n",
+			 read_mode,
+			 (unsigned int)((read_mode >> 4) & 0x3),
+			 (unsigned int)((read_mode >> 8) & 0x3));
+
 	if (sensor->streaming && hw_vblank > sensor->pa.vblank->val * 2)
 		dev_warn_once(&sensor->client->dev,
 			      "Large low-light VBLANK adjustment (%u -> %u) during streaming\n",
@@ -1465,6 +1481,10 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 		sensor->pa.exposure->flags &= ~V4L2_CTRL_FLAG_VOLATILE;
 		sensor->pa.gain->flags &= ~V4L2_CTRL_FLAG_VOLATILE;
 	}
+
+	dev_info(&sensor->client->dev,
+		 "mt9m114 exposure committed: vblank=%u frame_length=%u global_gain=0x%04x\n",
+		 hw_vblank, format->height + hw_vblank, hw_gain);
 
 out_group_hold:
 	if (!ret)

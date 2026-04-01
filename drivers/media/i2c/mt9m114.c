@@ -373,6 +373,8 @@
 #define MT9M114_SMART_METER_BACKLIT_DELTA		24
 #define MT9M114_SMART_METER_UNIFORM_DELTA		8
 
+#define MT9M114_STREAM_STATUS_LOG_INTERVAL_MS		30000
+
 #define MT9M114_SMART_AE_STATS_AVG_LUMA			CCI_REG8(0x3108)
 #define MT9M114_SMART_AE_STATS_CENTER_LUMA		CCI_REG8(0x310a)
 #define MT9M114_SMART_BLC_CTRL				CCI_REG8(0x3102)
@@ -532,6 +534,7 @@ struct mt9m114 {
 		unsigned long smart_metering_last_switch;
 		u8 smart_last_scene_avg;
 		u8 smart_last_center_avg;
+		struct delayed_work stream_status_work;
 
 		struct v4l2_ctrl *tpg[4];
 		struct completion unregistered;
@@ -1232,6 +1235,9 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 
 	sensor->streaming = true;
 
+	schedule_delayed_work(&sensor->ifp.stream_status_work,
+			      msecs_to_jiffies(MT9M114_STREAM_STATUS_LOG_INTERVAL_MS));
+
 	if (mt9m114_smart_metering && sensor->ifp.ae_auto) {
 		sensor->ifp.smart_metering_last_switch = 0;
 		sensor->ifp.smart_metering_active_preset =
@@ -1255,6 +1261,7 @@ static int mt9m114_stop_streaming(struct mt9m114 *sensor)
 	int ret;
 
 	sensor->streaming = false;
+	cancel_delayed_work_sync(&sensor->ifp.stream_status_work);
 	cancel_delayed_work_sync(&sensor->ifp.smart_meter_work);
 
 	ret = mt9m114_set_state(sensor, MT9M114_SYS_STATE_ENTER_SUSPEND);
@@ -1624,6 +1631,82 @@ reschedule:
 	if (sensor->streaming && sensor->ifp.ae_auto && mt9m114_smart_metering)
 		schedule_delayed_work(&sensor->ifp.smart_meter_work,
 				      msecs_to_jiffies(MT9M114_SMART_METER_INTERVAL_MS));
+}
+
+static void mt9m114_stream_status_work(struct work_struct *work)
+{
+	struct mt9m114 *sensor = container_of(to_delayed_work(work),
+					      struct mt9m114,
+					      ifp.stream_status_work);
+	u64 read_mode = 0;
+	u64 frame_length = 0;
+	u64 coarse = 0;
+	u64 analog_gain = 0;
+	u64 global_gain = 0;
+	u32 vblank;
+	u32 exposure;
+	u32 cached_gain;
+	u32 cached_vblank;
+	int ret;
+
+	if (!sensor->streaming)
+		return;
+
+	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
+		goto reschedule;
+
+	ret = cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
+		       &read_mode, NULL);
+	if (ret)
+		goto out_pm;
+
+	ret = cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
+		       &frame_length, NULL);
+	if (ret)
+		goto out_pm;
+
+	ret = cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
+		       &coarse, NULL);
+	if (ret)
+		goto out_pm;
+
+	ret = cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_ANALOG_GAIN,
+		       &analog_gain, NULL);
+	if (ret)
+		goto out_pm;
+
+	ret = cci_read(sensor->regmap, MT9M114_GLOBAL_GAIN, &global_gain, NULL);
+	if (ret)
+		goto out_pm;
+
+	exposure = (u32)coarse;
+	vblank = frame_length > sensor->pa.active_height ?
+		 (u32)frame_length - sensor->pa.active_height : 0;
+	cached_gain = sensor->pa.gain ? sensor->pa.gain->cur.val : 0;
+	cached_vblank = sensor->pa.vblank ? sensor->pa.vblank->cur.val : 0;
+
+	dev_info(&sensor->client->dev,
+		 "mt9m114 stream status: read_mode=0x%04llx x=%u y=%u frame_length=%u vblank=%u exp=%u analog_gain=0x%04llx global_gain=0x%04llx cached_gain=%u cached_vblank=%u lowlight=%u streaming=%u\n",
+		 read_mode,
+		 (unsigned int)((read_mode >> 4) & 0x3),
+		 (unsigned int)((read_mode >> 8) & 0x3),
+		 (u32)frame_length,
+		 vblank,
+		 exposure,
+		 analog_gain,
+		 global_gain,
+		 cached_gain,
+		 cached_vblank,
+		 sensor->pa.lowlight_active,
+		 sensor->streaming);
+
+out_pm:
+	pm_runtime_put_autosuspend(&sensor->client->dev);
+
+reschedule:
+	if (sensor->streaming)
+		schedule_delayed_work(&sensor->ifp.stream_status_work,
+				      msecs_to_jiffies(MT9M114_STREAM_STATUS_LOG_INTERVAL_MS));
 }
 
 static int mt9m114_pa_g_ctrl(struct v4l2_ctrl *ctrl)
@@ -2992,6 +3075,8 @@ static int mt9m114_ifp_init(struct mt9m114 *sensor)
 	sensor->ifp.frame_rate = MT9M114_DEF_FRAME_RATE;
 	sensor->ifp.ae_auto = true;
 	sensor->ifp.smart_metering_active_preset = MT9M114_METERING_PRESET_CENTER;
+	INIT_DELAYED_WORK(&sensor->ifp.stream_status_work,
+			  mt9m114_stream_status_work);
 	INIT_DELAYED_WORK(&sensor->ifp.smart_meter_work,
 			  mt9m114_smart_metering_work);
 
@@ -3074,6 +3159,7 @@ error:
 
 static void mt9m114_ifp_cleanup(struct mt9m114 *sensor)
 {
+	cancel_delayed_work_sync(&sensor->ifp.stream_status_work);
 	cancel_delayed_work_sync(&sensor->ifp.smart_meter_work);
 	v4l2_ctrl_handler_free(&sensor->ifp.hdl);
 	media_entity_cleanup(&sensor->ifp.sd.entity);

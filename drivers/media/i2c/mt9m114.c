@@ -1070,6 +1070,12 @@ static int mt9m114_set_frame_rate_with_state(struct mt9m114 *sensor,
 	u16 max_rate;
 	int ret = 0;
 
+	if (!sensor->ifp.ae_auto) {
+		dev_dbg(&sensor->client->dev,
+			"frame-rate sync skipped in manual mode; exposure/vblank owns FPS\n");
+		return 0;
+	}
+
 	if (min_fps > max_fps)
 		min_fps = max_fps;
 

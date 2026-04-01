@@ -361,6 +361,8 @@
 /* Extended VBLANK range for low-light mode (VTS up to ~30000 lines) */
 #define MT9M114_MAX_VBLANK_LOWLIGHT			29024U  /* Allow 2+ second exposures */
 #define MT9M114_MAX_EXPOSURE_LOWLIGHT			29998U  /* VTS - 2 (hardware requirement) */
+#define MT9M114_LOWLIGHT_TARGET_FPS			2U
+#define MT9M114_LOWLIGHT_GAIN_THRESHOLD			192U
 
 #define MT9M114_DEF_FRAME_RATE				30
 #define MT9M114_MAX_FRAME_RATE				120
@@ -513,6 +515,8 @@ struct mt9m114 {
 		struct v4l2_ctrl *ae_rule_algo;
 		u32 active_width;
 		u32 active_height;
+		bool lowlight_active;
+		u32 last_stable_vblank;
 	} pa;
 
 	/* Image Flow Processor */
@@ -1317,6 +1321,13 @@ static int mt9m114_ensure_manual_ae(struct mt9m114 *sensor)
 	}
 
 	if (ae_track_mode & MT9M114_AE_TRACK_MODE_AUTO_ENABLE) {
+		ret = cci_write(sensor->regmap, MT9M114_AE_TRACK_ALGO, 0x00, NULL);
+		if (ret) {
+			dev_err(&sensor->client->dev,
+				"Failed to disable AE_TRACK_ALGO: %d\n", ret);
+			return ret;
+		}
+
 		ret = cci_write(sensor->regmap, MT9M114_AE_TRACK_MODE, 0x00, NULL);
 		if (ret) {
 			dev_err(&sensor->client->dev,
@@ -1330,54 +1341,138 @@ static int mt9m114_ensure_manual_ae(struct mt9m114 *sensor)
 	return 0;
 }
 
-/**
- * mt9m114_update_vts_for_exposure - Adjust VTS (frame length) for long exposure
- * @sensor: The MT9M114 sensor
- * @exposure: Desired exposure time in lines
- *
- * When exposure time exceeds the standard frame length, we need to extend
- * the VTS (Vertical Total Size) to accommodate it. This drops the frame rate
- * to gain more light collection time.
- *
- * Example: 30 FPS = 997 lines (976 active + 21 blanking)
- *          200ms exposure = ~6000 lines → VTS must be 6002, FPS drops to ~5
- *
- * CRITICAL: Hardware requires Integration_time < Frame_length - 2
- *           If violated, sensor's timing generator freezes!
- *
- * Uses GROUP_HOLD (0x8404) to synchronize VTS and Exposure atomically.
- *
- * Returns: 0 on success, negative errno on failure
- */
-static int mt9m114_update_vts_for_exposure(struct mt9m114 *sensor, u32 exposure)
+static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
+						s32 integration_time)
 {
-	u32 min_frame_length = exposure + 2;  /* CRITICAL: +2 margin required */
-	u32 old_vblank = sensor->pa.vblank->val;
-	u32 new_vblank;
+	struct mt9m114 *sensor = container_of(sd, struct mt9m114, pa.sd);
+	struct v4l2_subdev_state *state;
+	const struct v4l2_mbus_framefmt *format;
+	u32 requested_gain;
+	u32 requested_exposure;
+	u32 frame_length;
+	u32 target_frame_length;
+	u32 line_length;
+	u32 hw_gain;
+	u32 hw_vblank;
+	u64 lowlight_frame_length;
+	bool lowlight;
+	int ret = 0;
 
-	/* If current VTS is sufficient, no adjustment needed */
-	if (min_frame_length <= MT9M114_PIXEL_ARRAY_HEIGHT + old_vblank)
-		return 0;
+	if (!sensor->pa.vblank || !sensor->pa.hblank || !sensor->pa.exposure ||
+	    !sensor->pa.gain)
+		return -EINVAL;
 
-	/* Calculate new VBLANK to accommodate exposure + 2-line margin */
-	new_vblank = min_frame_length - MT9M114_PIXEL_ARRAY_HEIGHT;
+	state = v4l2_subdev_get_locked_active_state(sd);
+	if (!state)
+		return -EINVAL;
 
-	/* Clamp to maximum allowed VBLANK */
-	if (new_vblank > MT9M114_MAX_VBLANK_LOWLIGHT)
-		new_vblank = MT9M114_MAX_VBLANK_LOWLIGHT;
+	format = v4l2_subdev_state_get_format(state, 0);
+	if (!format)
+		return -EINVAL;
 
-	/* Warn if large VTS change during streaming (AtomISP CSS timeout risk) */
-	if (sensor->streaming && new_vblank > old_vblank * 2) {
-		dev_warn_once(&sensor->client->dev,
-			      "Large VTS adjustment (%u -> %u) during streaming. "
-			      "AtomISP CSS firmware may timeout. "
-			      "Recommend stop/reconfigure/restart stream.\n",
-			      old_vblank, new_vblank);
+	requested_gain = clamp_t(u32, gain, 1, sensor->pa.gain->maximum);
+	requested_exposure = clamp_t(u32, integration_time, 1,
+				     MT9M114_MAX_EXPOSURE_LOWLIGHT);
+
+	line_length = format->width + sensor->pa.hblank->val;
+	if (!line_length)
+		return -EINVAL;
+
+	frame_length = format->height + sensor->pa.vblank->val;
+	if (sensor->pa.lowlight_active) {
+		lowlight = requested_gain >= (MT9M114_LOWLIGHT_GAIN_THRESHOLD / 2) ||
+			   requested_exposure > (frame_length / 2);
+	} else {
+		lowlight = requested_gain >= MT9M114_LOWLIGHT_GAIN_THRESHOLD ||
+			   requested_exposure > frame_length - 2;
 	}
 
-	/* Update VBLANK control value (will be written by s_ctrl) */
-	return __v4l2_ctrl_modify_range(sensor->pa.vblank, MT9M114_MIN_VBLANK,
-					MT9M114_MAX_VBLANK_LOWLIGHT, 1, new_vblank);
+	target_frame_length = frame_length;
+	if (lowlight) {
+		lowlight_frame_length = div_u64((u64)sensor->pixrate,
+						(u64)line_length * MT9M114_LOWLIGHT_TARGET_FPS);
+		if (lowlight_frame_length > MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX)
+			lowlight_frame_length = MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX;
+		target_frame_length = max_t(u32, requested_exposure + 2,
+					   (u32)lowlight_frame_length);
+	} else if (requested_exposure + 2 > target_frame_length) {
+		target_frame_length = requested_exposure + 2;
+	}
+
+	if (target_frame_length < format->height + MT9M114_MIN_VBLANK)
+		target_frame_length = format->height + MT9M114_MIN_VBLANK;
+	if (target_frame_length > MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX)
+		target_frame_length = MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX;
+
+	hw_vblank = clamp_t(u32, target_frame_length - format->height,
+			    MT9M114_MIN_VBLANK, MT9M114_MAX_VBLANK_LOWLIGHT);
+	hw_gain = lowlight ? max_t(u32, requested_gain >> 2, 1) : requested_gain;
+
+	ret = mt9m114_ensure_manual_ae(sensor);
+	if (ret)
+		return ret;
+
+	ret = mt9m114_group_hold(sensor, true);
+	if (ret)
+		return ret;
+
+	ret = cci_update_bits(sensor->regmap,
+			      MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
+			      MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_MASK |
+			      MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_MASK,
+			      lowlight ? (MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_SUMMING |
+					  MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_SUMMING)
+				       : (MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_NORMAL |
+					  MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_NORMAL),
+			      NULL);
+	if (ret)
+		goto out_group_hold;
+
+	cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_ANALOG_GAIN,
+		  hw_gain, &ret);
+	cci_write(sensor->regmap, MT9M114_GLOBAL_GAIN, hw_gain, &ret);
+	cci_write(sensor->regmap, MT9M114_FRAME_LENGTH_LINES,
+		  format->height + hw_vblank, &ret);
+	cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
+		  format->height + hw_vblank, &ret);
+	cci_write(sensor->regmap, MT9M114_COARSE_INTEGRATION_TIME,
+		  requested_exposure, &ret);
+	cci_write(sensor->regmap,
+		  MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
+		  requested_exposure, &ret);
+
+	if (ret)
+		goto out_group_hold;
+
+	if (sensor->streaming && hw_vblank > sensor->pa.vblank->val * 2)
+		dev_warn_once(&sensor->client->dev,
+			      "Large low-light VBLANK adjustment (%u -> %u) during streaming\n",
+			      sensor->pa.vblank->val, hw_vblank);
+
+	sensor->pa.lowlight_active = lowlight;
+	sensor->pa.last_stable_vblank = hw_vblank;
+	sensor->pa.vblank->val = hw_vblank;
+	sensor->pa.vblank->cur.val = hw_vblank;
+	sensor->pa.exposure->cur.val = requested_exposure;
+	sensor->pa.gain->cur.val = requested_gain;
+
+	__v4l2_ctrl_modify_range(sensor->pa.exposure, 1,
+				 target_frame_length - 2, 1,
+				 min_t(u32, sensor->pa.exposure->default_value,
+				       target_frame_length - 2));
+
+	if (lowlight) {
+		sensor->pa.exposure->flags &= ~V4L2_CTRL_FLAG_VOLATILE;
+		sensor->pa.gain->flags &= ~V4L2_CTRL_FLAG_VOLATILE;
+	}
+
+out_group_hold:
+	if (!ret)
+		ret = mt9m114_group_hold(sensor, false);
+	else
+		mt9m114_group_hold(sensor, false);
+
+	return ret;
 }
 
 static int mt9m114_apply_metering_preset(struct mt9m114 *sensor, unsigned int preset)
@@ -1505,49 +1600,21 @@ reschedule:
 				      msecs_to_jiffies(MT9M114_SMART_METER_INTERVAL_MS));
 }
 
-static int mt9m114_write_exposure(struct mt9m114 *sensor, u32 exposure,
-				  const struct v4l2_mbus_framefmt *format)
-{
-	u32 min_frame_length = exposure + 2;
-	u32 frame_length = format->height + sensor->pa.vblank->val;
-	u32 new_vblank;
-	int ret;
-
-	ret = mt9m114_update_vts_for_exposure(sensor, exposure);
-	if (ret)
-		return ret;
-
-	if (min_frame_length > frame_length) {
-		new_vblank = min_frame_length - format->height;
-		if (new_vblank > MT9M114_MAX_VBLANK_LOWLIGHT)
-			new_vblank = MT9M114_MAX_VBLANK_LOWLIGHT;
-
-		frame_length = format->height + new_vblank;
-
-		cci_write(sensor->regmap, MT9M114_FRAME_LENGTH_LINES,
-			  frame_length, &ret);
-		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
-			  frame_length, &ret);
-
-		sensor->pa.vblank->val = new_vblank;
-		sensor->pa.vblank->cur.val = new_vblank;
-	}
-
-	ret = cci_write(sensor->regmap, MT9M114_COARSE_INTEGRATION_TIME,
-			exposure, NULL);
-	if (ret)
-		return ret;
-
-	return cci_write(sensor->regmap,
-			 MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
-			 exposure, NULL);
-}
-
 static int mt9m114_pa_g_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct mt9m114 *sensor = pa_ctrl_to_mt9m114(ctrl);
 	u64 value;
 	int ret;
+
+	if (sensor->pa.lowlight_active) {
+		switch (ctrl->id) {
+		case V4L2_CID_VBLANK:
+		case V4L2_CID_EXPOSURE:
+		case V4L2_CID_ANALOGUE_GAIN:
+			ctrl->val = ctrl->cur.val;
+			return 0;
+		}
+	}
 
 	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
 		return 0;
@@ -1635,69 +1702,26 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 			  ctrl->val, &ret);
 		break;
 
-	case V4L2_CID_ANALOGUE_GAIN:
-		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_ANALOG_GAIN,
-			  ctrl->val, &ret);
-		cci_write(sensor->regmap, MT9M114_GLOBAL_GAIN,
-			  ctrl->val, &ret);
-		break;
-
 	case V4L2_CID_PIXEL_RATE:
 		/* Read-only, nothing to apply. */
 		break;
 
 	case V4L2_CID_EXPOSURE:
-		ret = mt9m114_ensure_manual_ae(sensor);
-		if (ret)
-			break;
-
-		ret = mt9m114_group_hold(sensor, true);
-		if (ret)
-			break;
-
-		ret = mt9m114_write_exposure(sensor, ctrl->val, format);
-		if (ret)
-			mt9m114_group_hold(sensor, false);
-		else
-			ret = mt9m114_group_hold(sensor, false);
+		ret = mt9m114_apply_exposure_params(&sensor->pa.sd,
+						    sensor->pa.gain->val,
+						    ctrl->val);
 		break;
 
 	case V4L2_CID_VBLANK:
-		ret = mt9m114_ensure_manual_ae(sensor);
-		if (ret)
-			break;
+		ret = mt9m114_apply_exposure_params(&sensor->pa.sd,
+						    sensor->pa.gain->val,
+						    sensor->pa.exposure->val);
+		break;
 
-		/*
-		 * VBLANK (Vertical Blanking Lines)
-		 *
-		 * Frame_length_lines = PIXEL_ARRAY_HEIGHT (976) + VBLANK
-		 *
-		 * Uses GROUP_HOLD to synchronize with exposure if needed.
-		 * Writes to CAM register:
-		 *   0xC812 (CAM: CAM_SENSOR_CFG_FRAME_LENGTH_LINES)
-		 */
-		ret = mt9m114_group_hold(sensor, true);
-		if (ret)
-			break;
-
-		value = ctrl->val + format->height;
-		cci_write(sensor->regmap, MT9M114_FRAME_LENGTH_LINES, value, &ret);
-		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
-			  value, &ret);
-
-		/*
-		 * Updating the frame length may extend the frame interval,
-		 * shrinking the maximum exposure value. If it was at its
-		 * maximum, it needs to be reduced to remain smaller than
-		 * two lines less than the frame length.
-		 */
-		__v4l2_ctrl_modify_range(sensor->pa.exposure, 1,
-				 value - 2, 1,
-					 sensor->pa.exposure->default_value);
-		if (ret)
-			mt9m114_group_hold(sensor, false);
-		else
-			ret = mt9m114_group_hold(sensor, false);
+	case V4L2_CID_ANALOGUE_GAIN:
+		ret = mt9m114_apply_exposure_params(&sensor->pa.sd,
+						    ctrl->val,
+						    sensor->pa.exposure->val);
 		break;
 
 	case V4L2_CID_HBLANK:
@@ -2069,7 +2093,7 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 	 * minus two (hardware requirement to prevent timing generator freeze).
 	 * Extended to support low-light mode with VTS up to ~30000 lines.
 	 */
-	max_exposure = MT9M114_PIXEL_ARRAY_HEIGHT + MT9M114_MIN_VBLANK - 2;
+	max_exposure = MT9M114_MAX_EXPOSURE_LOWLIGHT;
 	sensor->pa.exposure = v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops,
 						V4L2_CID_EXPOSURE, 1,
 						max_exposure, 1, 16);
@@ -2115,6 +2139,8 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 	state = v4l2_subdev_lock_and_get_active_state(sd);
 	format = v4l2_subdev_state_get_format(state, 0);
 	mt9m114_pa_ctrl_update_blanking(sensor, state, format);
+	sensor->pa.lowlight_active = false;
+	sensor->pa.last_stable_vblank = sensor->pa.vblank->val;
 	v4l2_subdev_unlock_state(state);
 
 	sd->ctrl_handler = hdl;
@@ -2190,6 +2216,8 @@ static int mt9m114_dump_stats(struct mt9m114 *sensor)
 	u16 blc = 0;
 	unsigned int i;
 	int ret;
+	u16 fallback = sensor->pa.last_stable_vblank ? sensor->pa.last_stable_vblank
+						     : MT9M114_DEF_VBLANK;
 
 	ret = mt9m114_read_logical_u16(sensor, blc_addr, &blc);
 	if (ret) {
@@ -2204,10 +2232,13 @@ static int mt9m114_dump_stats(struct mt9m114 *sensor)
 
 		ret = mt9m114_read_logical_u16(sensor, addr, &values[i]);
 		if (ret) {
-			dev_err(&sensor->client->dev,
-				"debug-dump: failed reading AE zone @0x%04x (%d)\n",
-				addr, ret);
-			return ret;
+			dev_warn(&sensor->client->dev,
+				"debug-dump: AE stats unavailable @0x%04x (%d), falling back to vblank=%u\n",
+				addr, ret, fallback);
+			for (i = 0; i < ARRAY_SIZE(values); i++)
+				values[i] = fallback;
+			ret = 0;
+			break;
 		}
 	}
 
@@ -2260,6 +2291,8 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 
 	if (ctrl->id == V4L2_CID_EXPOSURE_AUTO) {
 		sensor->ifp.ae_auto = ctrl->val == V4L2_EXPOSURE_AUTO;
+		if (sensor->ifp.ae_auto)
+			sensor->pa.lowlight_active = false;
 		if (sensor->pa.vblank) {
 			if (sensor->ifp.ae_auto)
 				sensor->pa.vblank->flags |= V4L2_CTRL_FLAG_VOLATILE;

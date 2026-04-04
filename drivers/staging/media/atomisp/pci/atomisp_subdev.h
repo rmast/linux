@@ -258,6 +258,7 @@ struct atomisp_sub_device {
 	struct list_head s3a_stats_in_css;
 	/* The list of s3a stat buffers which are ready for userspace to get */
 	struct list_head s3a_stats_ready;
+	unsigned long s3a_status_last_log_jiffies;
 
 	struct list_head dis_stats;
 	struct list_head dis_stats_in_css;

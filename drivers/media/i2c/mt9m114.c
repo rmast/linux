@@ -17,6 +17,7 @@
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/jiffies.h>
+#include <linux/ktime.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -479,6 +480,21 @@ static bool mt9m114_smart_metering_blc;
 module_param_named(smart_metering_blc, mt9m114_smart_metering_blc, bool, 0644);
 MODULE_PARM_DESC(smart_metering_blc,
 		 "Enable backlight compensation bit toggling at register 0x3102");
+
+static unsigned int mt9m114_stream_status_interval_ms =
+	MT9M114_STREAM_STATUS_LOG_INTERVAL_MS;
+module_param_named(stream_status_interval_ms, mt9m114_stream_status_interval_ms,
+		   uint, 0644);
+MODULE_PARM_DESC(stream_status_interval_ms,
+		 "Periodic stream status log interval in milliseconds (200..60000)");
+
+static unsigned long mt9m114_stream_status_interval_jiffies(void)
+{
+	u32 interval_ms = clamp_t(u32, mt9m114_stream_status_interval_ms,
+				  200U, 60000U);
+
+	return msecs_to_jiffies(interval_ms);
+}
 
 struct mt9m114_format_info {
 	u32 code;
@@ -1236,7 +1252,7 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 	sensor->streaming = true;
 
 	schedule_delayed_work(&sensor->ifp.stream_status_work,
-			      msecs_to_jiffies(MT9M114_STREAM_STATUS_LOG_INTERVAL_MS));
+			      mt9m114_stream_status_interval_jiffies());
 
 	if (mt9m114_smart_metering && sensor->ifp.ae_auto) {
 		sensor->ifp.smart_metering_last_switch = 0;
@@ -1355,11 +1371,12 @@ static int mt9m114_ensure_manual_ae(struct mt9m114 *sensor)
 }
 
 static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
-						s32 integration_time)
+					s32 integration_time, s32 requested_vblank)
 {
 	struct mt9m114 *sensor = container_of(sd, struct mt9m114, pa.sd);
 	struct v4l2_subdev_state *state;
 	const struct v4l2_mbus_framefmt *format;
+	bool force_vblank = requested_vblank >= 0;
 	u64 read_mode = 0;
 	u32 requested_gain;
 	u32 requested_exposure;
@@ -1392,41 +1409,52 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 	if (!line_length)
 		return -EINVAL;
 
-	frame_length = format->height + sensor->pa.vblank->val;
-	if (sensor->pa.lowlight_active) {
-		lowlight = requested_gain >= (MT9M114_LOWLIGHT_GAIN_THRESHOLD / 2) ||
-			   requested_exposure > (frame_length / 2);
+	if (force_vblank) {
+		hw_vblank = clamp_t(u32, requested_vblank,
+				    MT9M114_MIN_VBLANK,
+				    sensor->pa.vblank->maximum);
+		target_frame_length = format->height + hw_vblank;
+		if (requested_exposure + 2 > target_frame_length)
+			requested_exposure = target_frame_length - 2;
+		lowlight = false;
+		hw_gain = requested_gain;
 	} else {
-		lowlight = requested_gain >= MT9M114_LOWLIGHT_GAIN_THRESHOLD ||
+		frame_length = format->height + sensor->pa.vblank->val;
+		if (sensor->pa.lowlight_active) {
+			lowlight = requested_gain >= (MT9M114_LOWLIGHT_GAIN_THRESHOLD / 2) ||
+				   requested_exposure > (frame_length / 2);
+		} else {
+			lowlight = requested_gain >= MT9M114_LOWLIGHT_GAIN_THRESHOLD ||
 			   requested_exposure > frame_length - 2;
+		}
+
+		target_frame_length = frame_length;
+		if (lowlight) {
+			lowlight_frame_length = div_u64((u64)sensor->pixrate,
+							(u64)line_length * MT9M114_LOWLIGHT_TARGET_FPS);
+			if (lowlight_frame_length > MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX)
+				lowlight_frame_length = MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX;
+			target_frame_length = max_t(u32, requested_exposure + 2,
+						   (u32)lowlight_frame_length);
+		} else if (requested_exposure + 2 > target_frame_length) {
+			target_frame_length = requested_exposure + 2;
+		}
+
+		if (target_frame_length < format->height + MT9M114_MIN_VBLANK)
+			target_frame_length = format->height + MT9M114_MIN_VBLANK;
+		if (target_frame_length > MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX)
+			target_frame_length = MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX;
+
+		hw_vblank = clamp_t(u32, target_frame_length - format->height,
+				    MT9M114_MIN_VBLANK, MT9M114_MAX_VBLANK_LOWLIGHT);
+		hw_gain = lowlight ? max_t(u32, requested_gain >> 2, 1) : requested_gain;
 	}
-
-	target_frame_length = frame_length;
-	if (lowlight) {
-		lowlight_frame_length = div_u64((u64)sensor->pixrate,
-						(u64)line_length * MT9M114_LOWLIGHT_TARGET_FPS);
-		if (lowlight_frame_length > MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX)
-			lowlight_frame_length = MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX;
-		target_frame_length = max_t(u32, requested_exposure + 2,
-					   (u32)lowlight_frame_length);
-	} else if (requested_exposure + 2 > target_frame_length) {
-		target_frame_length = requested_exposure + 2;
-	}
-
-	if (target_frame_length < format->height + MT9M114_MIN_VBLANK)
-		target_frame_length = format->height + MT9M114_MIN_VBLANK;
-	if (target_frame_length > MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX)
-		target_frame_length = MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX;
-
-	hw_vblank = clamp_t(u32, target_frame_length - format->height,
-			    MT9M114_MIN_VBLANK, MT9M114_MAX_VBLANK_LOWLIGHT);
-	hw_gain = lowlight ? max_t(u32, requested_gain >> 2, 1) : requested_gain;
 
 	dev_info(&sensor->client->dev,
 		 "mt9m114 exposure apply: requested_gain=%u requested_exposure=%u "
-		 "computed_vblank=%u target_frame_length=%u lowlight=%u hw_gain=0x%04x\n",
-		 requested_gain, requested_exposure, hw_vblank, target_frame_length,
-		 lowlight, hw_gain);
+		 "requested_vblank=%d computed_vblank=%u target_frame_length=%u lowlight=%u hw_gain=0x%04x\n",
+		 requested_gain, requested_exposure, requested_vblank, hw_vblank,
+		 target_frame_length, lowlight, hw_gain);
 
 	ret = mt9m114_ensure_manual_ae(sensor);
 	if (ret)
@@ -1639,14 +1667,26 @@ static void mt9m114_stream_status_work(struct work_struct *work)
 					      struct mt9m114,
 					      ifp.stream_status_work);
 	u64 read_mode = 0;
-	u64 frame_length = 0;
+	u64 frame_length_live = 0;
+	u64 frame_length_cfg = 0;
+	u64 line_length = 0;
 	u64 coarse = 0;
 	u64 analog_gain = 0;
 	u64 global_gain = 0;
+	u64 ae_min_rate = 0;
+	u64 ae_max_rate = 0;
 	u32 vblank;
 	u32 exposure;
 	u32 cached_gain;
 	u32 cached_vblank;
+	u32 fps_int = 0;
+	u32 fps_frac_milli = 0;
+	u32 ae_min_fps_int = 0;
+	u32 ae_min_fps_frac = 0;
+	u32 ae_max_fps_int = 0;
+	u32 ae_max_fps_frac = 0;
+	u64 fps_x1000;
+	u64 uptime_ms;
 	int ret;
 
 	if (!sensor->streaming)
@@ -1660,8 +1700,18 @@ static void mt9m114_stream_status_work(struct work_struct *work)
 	if (ret)
 		goto out_pm;
 
+	ret = cci_read(sensor->regmap, MT9M114_FRAME_LENGTH_LINES,
+		       &frame_length_live, NULL);
+	if (ret)
+		goto out_pm;
+
 	ret = cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
-		       &frame_length, NULL);
+		       &frame_length_cfg, NULL);
+	if (ret)
+		goto out_pm;
+
+	ret = cci_read(sensor->regmap, MT9M114_CAM_SENSOR_CFG_LINE_LENGTH_PCK,
+		       &line_length, NULL);
 	if (ret)
 		goto out_pm;
 
@@ -1679,22 +1729,58 @@ static void mt9m114_stream_status_work(struct work_struct *work)
 	if (ret)
 		goto out_pm;
 
+	ret = cci_read(sensor->regmap, MT9M114_CAM_AET_MIN_FRAME_RATE,
+		       &ae_min_rate, NULL);
+	if (ret)
+		goto out_pm;
+
+	ret = cci_read(sensor->regmap, MT9M114_CAM_AET_MAX_FRAME_RATE,
+		       &ae_max_rate, NULL);
+	if (ret)
+		goto out_pm;
+
 	exposure = (u32)coarse;
-	vblank = frame_length > sensor->pa.active_height ?
-		 (u32)frame_length - sensor->pa.active_height : 0;
+	vblank = frame_length_live > sensor->pa.active_height ?
+		 (u32)frame_length_live - sensor->pa.active_height : 0;
 	cached_gain = sensor->pa.gain ? sensor->pa.gain->cur.val : 0;
 	cached_vblank = sensor->pa.vblank ? sensor->pa.vblank->cur.val : 0;
 
+	if (sensor->pixrate && line_length && frame_length_live) {
+		fps_x1000 = div_u64((u64)sensor->pixrate * 1000ULL,
+				   line_length * frame_length_live);
+		fps_int = div_u64(fps_x1000, 1000);
+		fps_frac_milli = fps_x1000 - (u64)fps_int * 1000ULL;
+	}
+
+	ae_min_fps_int = (u32)ae_min_rate >> 8;
+	ae_min_fps_frac = ((u32)ae_min_rate & 0xff) * 100 / 256;
+	ae_max_fps_int = (u32)ae_max_rate >> 8;
+	ae_max_fps_frac = ((u32)ae_max_rate & 0xff) * 100 / 256;
+	uptime_ms = ktime_to_ms(ktime_get_boottime());
+
 	dev_info(&sensor->client->dev,
-		 "mt9m114 stream status: read_mode=0x%04llx x=%u y=%u frame_length=%u vblank=%u exp=%u analog_gain=0x%04llx global_gain=0x%04llx cached_gain=%u cached_vblank=%u lowlight=%u streaming=%u\n",
+		 "mt9m114 stream status: uptime_ms=%llu read_mode=0x%04llx x=%u y=%u frame_length_live=%u frame_length_cfg=%u line_length=%u vblank=%u exp=%u analog_gain=0x%04llx global_gain=0x%04llx ae_min_rate_raw=0x%04llx ae_max_rate_raw=0x%04llx ae_min_fps=%u.%02u ae_max_fps=%u.%02u fps=%u.%03u scene_luma=%u center_luma=%u cached_gain=%u cached_vblank=%u lowlight=%u streaming=%u\n",
+		 uptime_ms,
 		 read_mode,
 		 (unsigned int)((read_mode >> 4) & 0x3),
 		 (unsigned int)((read_mode >> 8) & 0x3),
-		 (u32)frame_length,
+		 (u32)frame_length_live,
+		 (u32)frame_length_cfg,
+		 (u32)line_length,
 		 vblank,
 		 exposure,
 		 analog_gain,
 		 global_gain,
+		 ae_min_rate,
+		 ae_max_rate,
+		 ae_min_fps_int,
+		 ae_min_fps_frac,
+		 ae_max_fps_int,
+		 ae_max_fps_frac,
+		 fps_int,
+		 fps_frac_milli,
+		 sensor->ifp.smart_last_scene_avg,
+		 sensor->ifp.smart_last_center_avg,
 		 cached_gain,
 		 cached_vblank,
 		 sensor->pa.lowlight_active,
@@ -1706,7 +1792,7 @@ out_pm:
 reschedule:
 	if (sensor->streaming)
 		schedule_delayed_work(&sensor->ifp.stream_status_work,
-				      msecs_to_jiffies(MT9M114_STREAM_STATUS_LOG_INTERVAL_MS));
+				      mt9m114_stream_status_interval_jiffies());
 }
 
 static int mt9m114_pa_g_ctrl(struct v4l2_ctrl *ctrl)
@@ -1818,19 +1904,20 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_EXPOSURE:
 		ret = mt9m114_apply_exposure_params(&sensor->pa.sd,
 						    sensor->pa.gain->val,
-						    ctrl->val);
+					    ctrl->val, -1);
 		break;
 
 	case V4L2_CID_VBLANK:
 		ret = mt9m114_apply_exposure_params(&sensor->pa.sd,
 						    sensor->pa.gain->val,
-						    sensor->pa.exposure->val);
+					    sensor->pa.exposure->val,
+					    ctrl->val);
 		break;
 
 	case V4L2_CID_ANALOGUE_GAIN:
 		ret = mt9m114_apply_exposure_params(&sensor->pa.sd,
 						    ctrl->val,
-						    sensor->pa.exposure->val);
+					    sensor->pa.exposure->val, -1);
 		break;
 
 	case V4L2_CID_HBLANK:

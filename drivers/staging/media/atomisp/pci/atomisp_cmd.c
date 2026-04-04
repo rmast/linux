@@ -8,7 +8,9 @@
  */
 #include <linux/errno.h>
 #include <linux/firmware.h>
+#include <linux/jiffies.h>
 #include <linux/math64.h>
+#include <linux/ktime.h>
 #include <linux/pci.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -63,6 +65,110 @@ union host {
 		void *hmm_ptr;
 	} ptr;
 };
+
+static bool atomisp_s3a_status_log_enable;
+module_param_named(s3a_status_log_enable, atomisp_s3a_status_log_enable,
+		   bool, 0644);
+MODULE_PARM_DESC(s3a_status_log_enable,
+		 "Enable periodic AtomISP S3A summary logging from kernel events");
+
+static unsigned int atomisp_s3a_status_log_interval_ms = 1000;
+module_param_named(s3a_status_log_interval_ms,
+		   atomisp_s3a_status_log_interval_ms, uint, 0644);
+MODULE_PARM_DESC(s3a_status_log_interval_ms,
+		 "AtomISP S3A summary log interval in milliseconds (100..60000)");
+
+static unsigned long atomisp_s3a_status_log_interval_jiffies(void)
+{
+	u32 interval_ms = clamp_t(u32, atomisp_s3a_status_log_interval_ms,
+				  100U, 60000U);
+
+	return msecs_to_jiffies(interval_ms);
+}
+
+static void atomisp_maybe_log_s3a_status(struct atomisp_sub_device *asd,
+					  struct atomisp_s3a_buf *s3a_buf)
+{
+	struct ia_css_3a_statistics *stats;
+	struct ia_css_3a_output *cells;
+	struct ia_css_3a_rgby_output *hist;
+	u32 width;
+	u32 height;
+	u32 count;
+	u32 idx;
+	s64 ae_y_sum = 0;
+	s64 awb_cnt_sum = 0;
+	s64 awb_r_sum = 0;
+	s64 awb_g_sum = 0;
+	s64 awb_b_sum = 0;
+	u64 hist_y_weighted = 0;
+	u64 hist_y_total = 0;
+	u32 y_hist_mean_x1000 = 0;
+	u64 uptime_ms;
+	unsigned long now;
+
+	if (!atomisp_s3a_status_log_enable)
+		return;
+
+	now = jiffies;
+	if (time_before(now,
+			asd->s3a_status_last_log_jiffies +
+			atomisp_s3a_status_log_interval_jiffies()))
+		return;
+
+	if (!s3a_buf || !s3a_buf->s3a_data || !s3a_buf->s3a_map ||
+	    !asd->params.s3a_user_stat)
+		return;
+
+	ia_css_translate_3a_statistics(asd->params.s3a_user_stat,
+				       s3a_buf->s3a_map);
+
+	stats = asd->params.s3a_user_stat;
+	width = stats->grid.width;
+	height = stats->grid.height;
+	count = width * height;
+
+	if (!count || !stats->data)
+		return;
+
+	cells = stats->data;
+	for (idx = 0; idx < count; idx++) {
+		ae_y_sum += cells[idx].ae_y;
+		awb_cnt_sum += cells[idx].awb_cnt;
+		awb_r_sum += cells[idx].awb_r;
+		awb_g_sum += cells[idx].awb_gr + cells[idx].awb_gb;
+		awb_b_sum += cells[idx].awb_b;
+	}
+
+	hist = stats->rgby_data;
+	if (hist) {
+		for (idx = 0; idx < 256; idx++) {
+			hist_y_weighted += (u64)hist[idx].y * idx;
+			hist_y_total += hist[idx].y;
+		}
+		if (hist_y_total)
+			y_hist_mean_x1000 = div_u64(hist_y_weighted * 1000ULL,
+						    hist_y_total);
+	}
+
+	uptime_ms = ktime_to_ms(ktime_get_boottime());
+	asd->s3a_status_last_log_jiffies = now;
+
+	dev_info(asd->isp->dev,
+		 "atomisp s3a status: uptime_ms=%llu exp_id=%u isp_config_id=%u grid=%ux%u ae_y_avg=%lld awb_cnt_avg=%lld awb_r_avg=%lld awb_g_avg=%lld awb_b_avg=%lld y_hist_mean=%u.%03u\n",
+		 uptime_ms,
+		 s3a_buf->s3a_data->exp_id,
+		 s3a_buf->s3a_data->isp_config_id,
+		 width,
+		 height,
+		 div_s64(ae_y_sum, count),
+		 div_s64(awb_cnt_sum, count),
+		 div_s64(awb_r_sum, count),
+		 div_s64(awb_g_sum, count),
+		 div_s64(awb_b_sum, count),
+		 y_hist_mean_x1000 / 1000,
+		 y_hist_mean_x1000 % 1000);
+}
 
 /*
  * get sensor:dis71430/ov2720 related info from v4l2_subdev->priv data field.
@@ -818,6 +924,7 @@ void atomisp_buf_done(struct atomisp_sub_device *asd, int error,
 
 		asd->s3a_bufs_in_css[css_pipe_id]--;
 		atomisp_3a_stats_ready_event(asd, buffer.css_buffer.exp_id);
+		atomisp_maybe_log_s3a_status(asd, s3a_buf);
 		if (s3a_buf)
 			dev_dbg(isp->dev, "%s: s3a stat with exp_id %d is ready\n",
 				__func__, s3a_buf->s3a_data->exp_id);

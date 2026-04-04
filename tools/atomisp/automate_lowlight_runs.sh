@@ -145,17 +145,19 @@ apply_vblank_with_ae_sequence() {
 
   while (( attempt <= max_retries )); do
     if (( attempt == 0 )); then
-      echo "  applying $AE_CTRL_NAME/VBLANK sequence ($AE_CTRL_NAME=0 -> VBLANK -> $AE_CTRL_NAME=$AE_AUTO_VALUE)..."
+      echo "  applying $AE_CTRL_NAME/VBLANK sequence ($AE_CTRL_NAME=0 -> $AE_CTRL_NAME=$AE_AUTO_VALUE -> VBLANK)..."
     else
       echo "  retrying $AE_CTRL_NAME/VBLANK sequence ($attempt/$max_retries)..."
     fi
 
+    # Keep the historical pre-step (value 0), then switch to the target mode
+    # before writing VBLANK to reduce immediate auto-mode overwrite.
     set_exposure_auto_mode 0 || true
+    set_exposure_auto_mode "$AE_AUTO_VALUE" || true
     if ! v4l2-ctl --device "$PA_SUBDEV" --set-ctrl "vertical_blanking=$target_vblank" >/dev/null 2>&1; then
       echo "  warning: failed to set vertical_blanking=$target_vblank on $PA_SUBDEV"
       return 1
     fi
-    set_exposure_auto_mode "$AE_AUTO_VALUE" || true
 
     vb_readback="$(v4l2-ctl --device "$PA_SUBDEV" --get-ctrl vertical_blanking 2>/dev/null | awk -F': ' '{print $2}' | tr -d '\r')"
     if [[ -z "$vb_readback" ]]; then
@@ -166,6 +168,9 @@ apply_vblank_with_ae_sequence() {
     echo "  vertical_blanking target=$target_vblank readback=$vb_readback"
     if [[ "$vb_readback" == "$target_vblank" ]]; then
       return 0
+    fi
+    if [[ "$target_vblank" -gt 100 && "$vb_readback" -le 21 ]]; then
+      echo "  warning: VBLANK snapped to minimum while target is high; active timing owner likely overrides this control"
     fi
 
     attempt=$((attempt + 1))

@@ -1410,6 +1410,9 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 		return -EINVAL;
 
 	if (force_vblank) {
+		u32 target_fps_x256;
+		u16 target_rate;
+
 		hw_vblank = clamp_t(u32, requested_vblank,
 				    MT9M114_MIN_VBLANK,
 				    sensor->pa.vblank->maximum);
@@ -1418,6 +1421,31 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 			requested_exposure = target_frame_length - 2;
 		lowlight = false;
 		hw_gain = requested_gain;
+
+		/*
+		 * In manual mode, the firmware may still drive live frame length from
+		 * AET rate limits. Force min=max to the requested frame duration so
+		 * MT9M114_FRAME_LENGTH_LINES tracks the requested VBLANK.
+		 */
+		if (!sensor->ifp.ae_auto) {
+			target_fps_x256 = clamp_t(u32,
+				div_u64((u64)sensor->pixrate * 256ULL,
+					(u64)line_length * target_frame_length),
+				1U, (u32)(MT9M114_MAX_FRAME_RATE << 8));
+			target_rate = (u16)target_fps_x256;
+			cci_write(sensor->regmap, MT9M114_CAM_AET_MIN_FRAME_RATE,
+				  target_rate, &ret);
+			cci_write(sensor->regmap, MT9M114_CAM_AET_MAX_FRAME_RATE,
+				  target_rate, &ret);
+			if (ret)
+				return ret;
+
+			dev_info(&sensor->client->dev,
+				 "mt9m114 manual vblank force: aet_min=max=0x%04x (%u.%02u fps)\n",
+				 target_rate,
+				 target_rate >> 8,
+				 (target_rate & 0xff) * 100 / 256);
+		}
 	} else {
 		frame_length = format->height + sensor->pa.vblank->val;
 		if (sensor->pa.lowlight_active) {
@@ -1752,6 +1780,16 @@ static void mt9m114_stream_status_work(struct work_struct *work)
 		fps_frac_milli = fps_x1000 - (u64)fps_int * 1000ULL;
 	}
 
+	if (frame_length_cfg > frame_length_live * 2 ||
+	    frame_length_live > frame_length_cfg * 2)
+		dev_warn_ratelimited(&sensor->client->dev,
+				     "frame_length divergence: live=%u cfg=%u (vblank_live=%u cached_vblank=%u ae_auto=%u)\n",
+				     (u32)frame_length_live,
+				     (u32)frame_length_cfg,
+				     vblank,
+				     cached_vblank,
+				     sensor->ifp.ae_auto);
+
 	ae_min_fps_int = (u32)ae_min_rate >> 8;
 	ae_min_fps_frac = ((u32)ae_min_rate & 0xff) * 100 / 256;
 	ae_max_fps_int = (u32)ae_max_rate >> 8;
@@ -1868,12 +1906,33 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct mt9m114 *sensor = pa_ctrl_to_mt9m114(ctrl);
 	const struct v4l2_mbus_framefmt *format;
 	struct v4l2_subdev_state *state;
+	const char *ctrl_name = "other";
 	unsigned int mask;
 	u32 value;
 	int ret = 0;
 
-	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
+	switch (ctrl->id) {
+	case V4L2_CID_VBLANK:
+		ctrl_name = "VBLANK";
+		break;
+	case V4L2_CID_EXPOSURE:
+		ctrl_name = "EXPOSURE";
+		break;
+	case V4L2_CID_ANALOGUE_GAIN:
+		ctrl_name = "ANALOGUE_GAIN";
+		break;
+	default:
+		break;
+	}
+
+	if (!pm_runtime_get_if_in_use(&sensor->client->dev)) {
+		if (ctrl->id == V4L2_CID_VBLANK || ctrl->id == V4L2_CID_EXPOSURE ||
+		    ctrl->id == V4L2_CID_ANALOGUE_GAIN)
+			dev_info(&sensor->client->dev,
+				 "mt9m114 pa_s_ctrl skip: ctrl=%s(%u) val=%d streaming=%u (runtime not in use)\n",
+				 ctrl_name, ctrl->id, ctrl->val, sensor->streaming);
 		return 0;
+	}
 
 	state = v4l2_subdev_get_locked_active_state(&sensor->pa.sd);
 	if (!state) {
@@ -1908,10 +1967,17 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 
 	case V4L2_CID_VBLANK:
+		dev_info(&sensor->client->dev,
+			 "mt9m114 pa_s_ctrl request: ctrl=VBLANK val=%d ae_auto=%u streaming=%u\n",
+			 ctrl->val, sensor->ifp.ae_auto, sensor->streaming);
 		ret = mt9m114_apply_exposure_params(&sensor->pa.sd,
 						    sensor->pa.gain->val,
 					    sensor->pa.exposure->val,
 					    ctrl->val);
+		if (ret)
+			dev_info(&sensor->client->dev,
+				 "mt9m114 pa_s_ctrl result: ctrl=VBLANK val=%d ret=%d\n",
+				 ctrl->val, ret);
 		break;
 
 	case V4L2_CID_ANALOGUE_GAIN:

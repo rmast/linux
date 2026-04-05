@@ -27,6 +27,9 @@ AE_PREARM_BEFORE_PROMPT=1
 AE_PREARM_SETTLE_SECONDS=2
 VBLANK_VERIFY_RETRIES=1
 VBLANK_RETRY_SETTLE_SECONDS=1
+PREFLIGHT_LINE_LENGTH=""
+PREFLIGHT_ACTIVE_HEIGHT=""
+PREFLIGHT_VB_MAX=""
 
 usage() {
   cat <<EOF
@@ -140,6 +143,7 @@ set_exposure_auto_mode() {
 apply_vblank_with_ae_sequence() {
   local target_vblank="$1"
   local max_retries="$2"
+  local min_vblank="${3:-21}"
   local attempt=0
   local vb_readback=""
 
@@ -169,6 +173,22 @@ apply_vblank_with_ae_sequence() {
     if [[ "$vb_readback" == "$target_vblank" ]]; then
       return 0
     fi
+
+    if (( attempt == 0 )); then
+      echo "  attempting VBLANK recovery (set min=$min_vblank then target=$target_vblank)..."
+      set_exposure_auto_mode 0 || true
+      v4l2-ctl --device "$PA_SUBDEV" --set-ctrl "vertical_blanking=$min_vblank" >/dev/null 2>&1 || true
+      set_exposure_auto_mode "$AE_AUTO_VALUE" || true
+      v4l2-ctl --device "$PA_SUBDEV" --set-ctrl "vertical_blanking=$target_vblank" >/dev/null 2>&1 || true
+      vb_readback="$(v4l2-ctl --device "$PA_SUBDEV" --get-ctrl vertical_blanking 2>/dev/null | awk -F': ' '{print $2}' | tr -d '\r')"
+      if [[ -n "$vb_readback" ]]; then
+        echo "  recovery readback target=$target_vblank readback=$vb_readback"
+      fi
+      if [[ "$vb_readback" == "$target_vblank" ]]; then
+        return 0
+      fi
+    fi
+
     if [[ "$target_vblank" -gt 100 && "$vb_readback" -le 21 ]]; then
       echo "  warning: VBLANK snapped to minimum while target is high; active timing owner likely overrides this control"
     fi
@@ -179,6 +199,20 @@ apply_vblank_with_ae_sequence() {
       sleep "$VBLANK_RETRY_SETTLE_SECONDS"
     fi
   done
+
+  echo "  attempting final direct VBLANK write without AE sequencing..."
+  if v4l2-ctl --device "$PA_SUBDEV" --set-ctrl "vertical_blanking=$target_vblank" >/dev/null 2>&1; then
+    vb_readback="$(v4l2-ctl --device "$PA_SUBDEV" --get-ctrl vertical_blanking 2>/dev/null | awk -F': ' '{print $2}' | tr -d '\r')"
+    if [[ "$vb_readback" == "$target_vblank" ]]; then
+      echo "  final direct write succeeded: target=$target_vblank readback=$vb_readback"
+      return 0
+    fi
+    if [[ -n "$vb_readback" ]]; then
+      echo "  final direct write readback mismatch: target=$target_vblank readback=$vb_readback"
+    fi
+  else
+    echo "  warning: final direct vertical_blanking write failed on $PA_SUBDEV"
+  fi
 
   echo "  warning: vertical_blanking readback mismatch persisted after $max_retries retries"
   return 1
@@ -223,6 +257,7 @@ apply_fps() {
   local vb_readback=""
   local fps_est=""
   local min_fps_theoretical=""
+  local max_fps_theoretical=""
 
   if ! command -v v4l2-ctl >/dev/null 2>&1; then
     echo "  warning: v4l2-ctl not found, cannot force FPS=$fps"
@@ -277,6 +312,14 @@ apply_fps() {
     fi
 
     min_fps_theoretical=$(awk -v p="$PIXRATE" -v ll="$line_length" -v ah="$active_height" -v vbmax="$vb_max" 'BEGIN { if (ll > 0 && (ah + vbmax) > 0) printf "%.3f", p / (ll * (ah + vbmax)); else printf "nan" }')
+    max_fps_theoretical=$(awk -v p="$PIXRATE" -v ll="$line_length" -v ah="$active_height" -v vbmin="$vb_min" 'BEGIN { if (ll > 0 && (ah + vbmin) > 0) printf "%.3f", p / (ll * (ah + vbmin)); else printf "nan" }')
+
+    if [[ -n "$PREFLIGHT_LINE_LENGTH" && -n "$PREFLIGHT_ACTIVE_HEIGHT" && -n "$PREFLIGHT_VB_MAX" ]]; then
+      if [[ "$line_length" != "$PREFLIGHT_LINE_LENGTH" || "$active_height" != "$PREFLIGHT_ACTIVE_HEIGHT" || "$vb_max" != "$PREFLIGHT_VB_MAX" ]]; then
+        echo "  warning: timing basis changed since preflight: line_length ${PREFLIGHT_LINE_LENGTH}->${line_length}, active_height ${PREFLIGHT_ACTIVE_HEIGHT}->${active_height}, vblank_max ${PREFLIGHT_VB_MAX}->${vb_max}"
+        echo "  current theoretical fps range ${min_fps_theoretical} .. ${max_fps_theoretical}"
+      fi
+    fi
     if awk -v req="$fps" -v minf="$min_fps_theoretical" 'BEGIN { exit !(req < minf) }'; then
       echo "  warning: requested FPS=$fps is below theoretical minimum ${min_fps_theoretical} for current mode (line_length=$line_length, active_height=$active_height, vblank_max=$vb_max)"
       if [[ "$ALLOW_UNFEASIBLE_FPS" -eq 0 ]]; then
@@ -293,7 +336,7 @@ apply_fps() {
     fi
 
     if [[ "$AE_TOGGLE_ON_FPS_SWITCH" -eq 1 ]]; then
-      if ! apply_vblank_with_ae_sequence "$target_vblank" "$VBLANK_VERIFY_RETRIES"; then
+      if ! apply_vblank_with_ae_sequence "$target_vblank" "$VBLANK_VERIFY_RETRIES" "$vb_min"; then
         return 1
       fi
     else
@@ -395,6 +438,10 @@ print_fps_preflight() {
 
   min_fps_theoretical=$(awk -v p="$PIXRATE" -v ll="$line_length" -v ah="$active_height" -v vbmax="$vb_max" 'BEGIN { if (ll > 0 && (ah + vbmax) > 0) printf "%.3f", p / (ll * (ah + vbmax)); else printf "nan" }')
   max_fps_theoretical=$(awk -v p="$PIXRATE" -v ll="$line_length" -v ah="$active_height" -v vbmin="$vb_min" 'BEGIN { if (ll > 0 && (ah + vbmin) > 0) printf "%.3f", p / (ll * (ah + vbmin)); else printf "nan" }')
+
+  PREFLIGHT_LINE_LENGTH="$line_length"
+  PREFLIGHT_ACTIVE_HEIGHT="$active_height"
+  PREFLIGHT_VB_MAX="$vb_max"
 
   echo "preflight: timing basis line_length=$line_length active_height=$active_height vblank_range=$vb_min..$vb_max"
   echo "preflight: theoretical fps range ${min_fps_theoretical} .. ${max_fps_theoretical}"

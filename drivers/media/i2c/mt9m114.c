@@ -472,7 +472,11 @@ static const char * const mt9m114_ae_rule_algo_names[] = {
 	NULL,
 };
 
-static bool mt9m114_smart_metering = true;
+/*
+ * Keep smart metering opt-in for now: dynamic preset switching during
+ * streaming can destabilize some AtomISP capture paths.
+ */
+static bool mt9m114_smart_metering;
 module_param_named(smart_metering, mt9m114_smart_metering, bool, 0644);
 MODULE_PARM_DESC(smart_metering,
 		 "Enable contrast-aware AE metering switching during streaming");

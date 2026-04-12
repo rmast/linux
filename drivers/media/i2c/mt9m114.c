@@ -1499,6 +1499,17 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 	binning_mode = format->width <= (MT9M114_PIXEL_ARRAY_WIDTH / 2 + 4) &&
 		       format->height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2 + 4);
 
+	/*
+	 * In active VGA/binning streams with auto-AE, avoid manual exposure
+	 * programming from this path. Repeated runtime register writes during
+	 * abrupt scene changes (e.g. hand-over-lens) can stall capture.
+	 */
+	if (sensor->streaming && binning_mode && sensor->ifp.ae_auto) {
+		dev_info_once(&sensor->client->dev,
+			      "mt9m114: bypassing manual exposure writes in VGA auto-AE stream\n");
+		return 0;
+	}
+
 	frame_length = format->height + sensor->pa.vblank->val;
 	if (sensor->pa.lowlight_active) {
 		lowlight = requested_gain >= (MT9M114_LOWLIGHT_GAIN_THRESHOLD / 2) ||

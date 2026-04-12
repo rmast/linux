@@ -1325,25 +1325,12 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 				goto error;
 			}
 
-			/*
-			 * Re-run CONFIG_CHANGE so firmware and IFP timing/crop state
-			 * are synchronized with the hardware read-mode override.
-			 */
-			ret = mt9m114_set_state(sensor,
-					       MT9M114_SYS_STATE_ENTER_CONFIG_CHANGE);
-			if (ret) {
-				dev_err(&sensor->client->dev,
-					"start_stream: set_state ENTER_CONFIG_CHANGE (post-0x3040) failed: %d\n",
-					ret);
-				goto error;
-			}
-
-			/* CONFIG_CHANGE may clobber 0x3040 on some firmware builds. */
+			/* Verify and re-apply bits if needed, but avoid another CONFIG_CHANGE. */
 			ret = cci_read(sensor->regmap, MT9M114_SENSOR_CORE_READ_MODE,
 				       &hw_read_mode, NULL);
 			if (ret) {
 				dev_err(&sensor->client->dev,
-					"start_stream: read hw 0x3040 after reconfig failed: %d\n",
+					"start_stream: read hw 0x3040 verify failed: %d\n",
 					ret);
 				goto error;
 			}
@@ -1354,14 +1341,14 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 						hw_read_mode, NULL);
 				if (ret) {
 					dev_err(&sensor->client->dev,
-						"start_stream: re-write hw 0x3040 after reconfig failed: %d\n",
+						"start_stream: re-write hw 0x3040 verify failed: %d\n",
 						ret);
 					goto error;
 				}
 			}
 
 			dev_info(&sensor->client->dev,
-				 "mt9m114: final hw 0x3040=0x%04llx (hratio=%u vratio=%u), reconfig done\n",
+				 "mt9m114: final hw 0x3040=0x%04llx (hratio=%u vratio=%u)\n",
 				 hw_read_mode, hratio, vratio);
 		}
 	}

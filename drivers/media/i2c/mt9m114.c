@@ -2817,13 +2817,16 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 		mt9m114_ifp_update_sel_and_src_fmt(state);
 	} else {
 		const struct mt9m114_format_info *info;
-		struct v4l2_rect *compose;
-		struct v4l2_rect *crop;
 		const struct v4l2_mbus_framefmt *sink_fmt;
 		bool summing_mode_hint;
 		u32 preferred_code = fmt->format.code;
 
-		/* Only the media bus code can be changed on the source pad. */
+		/*
+		 * Only the media bus code can be changed on the source pad.
+		 * The sink size is fixed by a prior sink-pad set_fmt call and
+		 * must not be altered here; the border-aware crop/compose
+		 * recalculation is handled by mt9m114_ifp_update_sel_and_src_fmt.
+		 */
 		sink_fmt = v4l2_subdev_state_get_format(state, 0);
 		summing_mode_hint =
 			sink_fmt->width <= (MT9M114_PIXEL_ARRAY_WIDTH / 2) &&
@@ -2833,6 +2836,11 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 		 * In low-resolution summing modes prefer processed YUV over RAW10
 		 * bypass. This matches the intended MT9M114 IFP path for VGA-like
 		 * modes and avoids atomisp configuring a Bayer bypass pipeline.
+		 * The border of 4 pixels on each side that the MT9M114 IFP needs
+		 * for its internal demosaicing is accommodated by the sink already
+		 * being sized 8 pixels wider/taller than the final output; the
+		 * existing crop recalculation in mt9m114_ifp_update_sel_and_src_fmt
+		 * subtracts exactly those border pixels from compose/source.
 		 */
 		if (summing_mode_hint && fmt->format.code == MEDIA_BUS_FMT_SGRBG10_1X10) {
 			preferred_code = sensor->bus_cfg.bus_type == V4L2_MBUS_CSI2_DPHY ?
@@ -2845,45 +2853,12 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 
 		info = mt9m114_format_info(sensor, 1, preferred_code);
 
-		/* Handle both media bus code and size changes on source pad. */
-		/* If size is requested, update the compose rectangle. */
-		if (fmt->format.width > 0 && fmt->format.height > 0) {
-			compose = v4l2_subdev_state_get_compose(state, 0);
-			crop = v4l2_subdev_state_get_crop(state, 0);
-
-			struct v4l2_mbus_framefmt *src_fmt, *sink_fmt;
-			unsigned int border;
-
-			/* Determine border based on the new format being set */
-			border = (info->code == MEDIA_BUS_FMT_SGRBG10_1X10) ? 0 : 4;
-
-			/* Update compose to the requested size */
-			compose->left = 0;
-			compose->top = 0;
-			compose->width = fmt->format.width;
-			compose->height = fmt->format.height;
-
-			/* Update crop to include the demosaicing border if needed */
-			crop->left = border;
-			crop->top = border;
-			crop->width = fmt->format.width + 2 * border;
-			crop->height = fmt->format.height + 2 * border;
-
-			/* Update sink format to match crop */
-			sink_fmt = v4l2_subdev_state_get_format(state, 0);
-			sink_fmt->width = crop->width;
-			sink_fmt->height = crop->height;
-
-			/* Update source format to match compose */
-			src_fmt = v4l2_subdev_state_get_format(state, fmt->pad);
-			src_fmt->width = compose->width;
-			src_fmt->height = compose->height;
-		}
 		/*
 		 * If the output format changes from/to RAW10 then the crop
 		 * rectangle needs to be adjusted to add / remove the 4 pixel
 		 * border used for demosaicing. And these changes then need to
 		 * be propagated to the compose rectangle and source format.
+		 * This also handles the RAW10→UYVY forced transition above.
 		 */
 		if ((format->code == MEDIA_BUS_FMT_SGRBG10_1X10) !=
 		    (info->code == MEDIA_BUS_FMT_SGRBG10_1X10)) {

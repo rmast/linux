@@ -2917,6 +2917,7 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 	if (fmt->pad == 0) {
 		unsigned int width;
 		unsigned int height;
+		bool vga_binning_mode;
 
 		/* Only the size can be changed on the sink pad. */
 		width = clamp(ALIGN(fmt->format.width, 4),
@@ -2930,8 +2931,10 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 		 * Normalize atomisp VGA padded request (652x492) to 648x488.
 		 * This matches exact 2x binning from 1296x976 in the PA.
 		 */
-		if (width <= (MT9M114_PIXEL_ARRAY_WIDTH / 2 + 4) &&
-		    height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2 + 4)) {
+		vga_binning_mode =
+			width <= (MT9M114_PIXEL_ARRAY_WIDTH / 2 + 4) &&
+			height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2 + 4);
+		if (vga_binning_mode) {
 			width = MT9M114_PIXEL_ARRAY_WIDTH / 2;
 			height = MT9M114_PIXEL_ARRAY_HEIGHT / 2;
 		}
@@ -2941,6 +2944,30 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 
 		/* Propagate changes downstream. */
 		mt9m114_ifp_update_sel_and_src_fmt(state);
+
+		/*
+		 * Keep VGA binning mode deterministic: a centered 640x480 compose
+		 * from 648x488 sink avoids intermittent 636x476 negotiation.
+		 */
+		if (vga_binning_mode) {
+			struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+			struct v4l2_rect *compose = v4l2_subdev_state_get_compose(state, 0);
+			struct v4l2_mbus_framefmt *src_fmt =
+				v4l2_subdev_state_get_format(state, 1);
+
+			crop->left = 4;
+			crop->top = 4;
+			crop->width = 640;
+			crop->height = 480;
+
+			compose->left = 0;
+			compose->top = 0;
+			compose->width = 640;
+			compose->height = 480;
+
+			src_fmt->width = 640;
+			src_fmt->height = 480;
+		}
 	} else {
 		const struct mt9m114_format_info *info;
 		const struct v4l2_mbus_framefmt *sink_fmt;

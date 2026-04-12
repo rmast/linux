@@ -2756,10 +2756,10 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 
 	if (fmt->pad == 0) {
 		/* Only the size can be changed on the sink pad. */
-		format->width = clamp(ALIGN(fmt->format.width, 8),
+		format->width = clamp(ALIGN(fmt->format.width, 4),
 				      MT9M114_PIXEL_ARRAY_MIN_OUTPUT_WIDTH,
 				      MT9M114_PIXEL_ARRAY_WIDTH);
-		format->height = clamp(ALIGN(fmt->format.height, 8),
+		format->height = clamp(ALIGN(fmt->format.height, 2),
 				       MT9M114_PIXEL_ARRAY_MIN_OUTPUT_HEIGHT,
 				       MT9M114_PIXEL_ARRAY_HEIGHT);
 

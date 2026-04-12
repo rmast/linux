@@ -1301,31 +1301,42 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 		if (hratio > 1 || vratio > 1) {
 			u64 hw_read_mode = 0;
 			u64 req_bits = 0;
+			u64 fw_read_mode = 0;
 
-			ret = cci_read(sensor->regmap, MT9M114_SENSOR_CORE_READ_MODE,
-				       &hw_read_mode, NULL);
-			if (ret) {
-				dev_err(&sensor->client->dev,
-					"start_stream: read hw 0x3040 failed: %d\n", ret);
-				goto error;
-			}
 			if (hratio > 1)
 				req_bits |= MT9M114_SENSOR_CORE_READ_MODE_COL_BIN2;
 			if (vratio > 1)
 				req_bits |= MT9M114_SENSOR_CORE_READ_MODE_ROW_BIN2;
-			if (hratio > 1)
-				hw_read_mode |= MT9M114_SENSOR_CORE_READ_MODE_COL_BIN2;
-			if (vratio > 1)
-				hw_read_mode |= MT9M114_SENSOR_CORE_READ_MODE_ROW_BIN2;
-			ret = cci_write(sensor->regmap, MT9M114_SENSOR_CORE_READ_MODE,
-					hw_read_mode, NULL);
+
+			/* Keep firmware-side readout mode aligned with requested binning. */
+			fw_read_mode =
+				(hratio > 1 ? MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_SUMMING :
+				 MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_NORMAL) |
+				(vratio > 1 ? MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_SUMMING :
+				 MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_NORMAL);
+
+			ret = cci_update_bits(sensor->regmap,
+				      MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
+				      MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_MASK |
+				      MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_MASK,
+				      fw_read_mode, NULL);
 			if (ret) {
 				dev_err(&sensor->client->dev,
-					"start_stream: write hw 0x3040 failed: %d\n", ret);
+					"start_stream: write fw read_mode failed: %d\n", ret);
 				goto error;
 			}
 
-			/* Verify and re-apply bits if needed, but avoid another CONFIG_CHANGE. */
+			/* Apply firmware readout mode updates. */
+			ret = mt9m114_set_state(sensor,
+				       MT9M114_SYS_STATE_ENTER_CONFIG_CHANGE);
+			if (ret) {
+				dev_err(&sensor->client->dev,
+					"start_stream: set_state ENTER_CONFIG_CHANGE (post-fw-read-mode) failed: %d\n",
+					ret);
+				goto error;
+			}
+
+			/* Re-assert hardware 0x3040 after CONFIG_CHANGE. */
 			ret = cci_read(sensor->regmap, MT9M114_SENSOR_CORE_READ_MODE,
 				       &hw_read_mode, NULL);
 			if (ret) {
@@ -1334,22 +1345,29 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 					ret);
 				goto error;
 			}
-			if ((hw_read_mode & req_bits) != req_bits) {
-				hw_read_mode |= req_bits;
-				ret = cci_write(sensor->regmap,
-						MT9M114_SENSOR_CORE_READ_MODE,
-						hw_read_mode, NULL);
-				if (ret) {
-					dev_err(&sensor->client->dev,
-						"start_stream: re-write hw 0x3040 verify failed: %d\n",
-						ret);
-					goto error;
-				}
+			hw_read_mode |= req_bits;
+			ret = cci_write(sensor->regmap, MT9M114_SENSOR_CORE_READ_MODE,
+					hw_read_mode, NULL);
+			if (ret) {
+				dev_err(&sensor->client->dev,
+					"start_stream: write hw 0x3040 failed: %d\n",
+					ret);
+				goto error;
+			}
+
+			/* Final verification readback. */
+			ret = cci_read(sensor->regmap, MT9M114_SENSOR_CORE_READ_MODE,
+				       &hw_read_mode, NULL);
+			if (ret) {
+				dev_err(&sensor->client->dev,
+					"start_stream: read hw 0x3040 verify failed: %d\n",
+					ret);
+				goto error;
 			}
 
 			dev_info(&sensor->client->dev,
-				 "mt9m114: final hw 0x3040=0x%04llx (hratio=%u vratio=%u)\n",
-				 hw_read_mode, hratio, vratio);
+				 "mt9m114: final fw_read_mode=0x%04llx hw_0x3040=0x%04llx (hratio=%u vratio=%u)\n",
+				 fw_read_mode, hw_read_mode, hratio, vratio);
 		}
 	}
 

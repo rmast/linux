@@ -1536,7 +1536,7 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 	 * programming from this path. Repeated runtime register writes during
 	 * abrupt scene changes (e.g. hand-over-lens) can stall capture.
 	 */
-	if (sensor->streaming && binning_mode && sensor->ifp.ae_auto) {
+	if (sensor->streaming && binning_mode) {
 		u64 hw_read_mode = 0;
 
 		ret = mt9m114_ensure_manual_ae(sensor);
@@ -1557,7 +1557,7 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 			return ret;
 
 		dev_info_once(&sensor->client->dev,
-			      "mt9m114: bypassing manual exposure writes in VGA auto-AE stream\n");
+			      "mt9m114: bypassing manual exposure writes in VGA binning stream\n");
 		return 0;
 	}
 
@@ -1621,6 +1621,11 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 		 MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_SUMMING) :
 		(MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_NORMAL |
 		 MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_NORMAL);
+
+	/* Binning mode must always use summed readout, independent of lowlight. */
+	if (binning_mode)
+		read_mode_bits = MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_SUMMING |
+				 MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_SUMMING;
 
 	/* In VGA/binning streaming mode we keep summing fixed at runtime. */
 	if (sensor->streaming && binning_mode)

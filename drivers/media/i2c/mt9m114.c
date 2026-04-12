@@ -1933,9 +1933,25 @@ static int mt9m114_pa_set_fmt(struct v4l2_subdev *sd,
 	struct v4l2_rect *crop;
 	unsigned int hscale;
 	unsigned int vscale;
+	bool vga_binning_hint;
 
 	crop = v4l2_subdev_state_get_crop(state, fmt->pad);
 	format = v4l2_subdev_state_get_format(state, fmt->pad);
+
+	/*
+	 * Atomisp requests 652x492 around VGA due to internal padding. That
+	 * prevents exact 2x scaling from the full array (1296x976) and thus
+	 * disables summing. Treat this request as VGA-binned mode and force
+	 * full-array crop so the PA can engage 2x summing and keep full FOV.
+	 */
+	vga_binning_hint = fmt->format.width <= (MT9M114_PIXEL_ARRAY_WIDTH / 2 + 4) &&
+			     fmt->format.height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2 + 4);
+	if (vga_binning_hint) {
+		crop->left = 0;
+		crop->top = 0;
+		crop->width = MT9M114_PIXEL_ARRAY_WIDTH;
+		crop->height = MT9M114_PIXEL_ARRAY_HEIGHT;
+	}
 
 	/* The sensor can bin horizontally and vertically. */
 	hscale = DIV_ROUND_CLOSEST(crop->width, fmt->format.width ? : 1);
@@ -2755,13 +2771,29 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 	format = v4l2_subdev_state_get_format(state, fmt->pad);
 
 	if (fmt->pad == 0) {
+		unsigned int width;
+		unsigned int height;
+
 		/* Only the size can be changed on the sink pad. */
-		format->width = clamp(ALIGN(fmt->format.width, 4),
+		width = clamp(ALIGN(fmt->format.width, 4),
 				      MT9M114_PIXEL_ARRAY_MIN_OUTPUT_WIDTH,
 				      MT9M114_PIXEL_ARRAY_WIDTH);
-		format->height = clamp(ALIGN(fmt->format.height, 2),
+		height = clamp(ALIGN(fmt->format.height, 2),
 				       MT9M114_PIXEL_ARRAY_MIN_OUTPUT_HEIGHT,
 				       MT9M114_PIXEL_ARRAY_HEIGHT);
+
+		/*
+		 * Normalize atomisp VGA padded request (652x492) to 648x488.
+		 * This matches exact 2x binning from 1296x976 in the PA.
+		 */
+		if (width <= (MT9M114_PIXEL_ARRAY_WIDTH / 2 + 4) &&
+		    height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2 + 4)) {
+			width = MT9M114_PIXEL_ARRAY_WIDTH / 2;
+			height = MT9M114_PIXEL_ARRAY_HEIGHT / 2;
+		}
+
+		format->width = width;
+		format->height = height;
 
 		/* Propagate changes downstream. */
 		mt9m114_ifp_update_sel_and_src_fmt(state);

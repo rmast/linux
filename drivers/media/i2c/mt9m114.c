@@ -1300,6 +1300,7 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 
 		if (hratio > 1 || vratio > 1) {
 			u64 hw_read_mode = 0;
+			u64 req_bits = 0;
 
 			ret = cci_read(sensor->regmap, MT9M114_SENSOR_CORE_READ_MODE,
 				       &hw_read_mode, NULL);
@@ -1308,6 +1309,10 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 					"start_stream: read hw 0x3040 failed: %d\n", ret);
 				goto error;
 			}
+			if (hratio > 1)
+				req_bits |= MT9M114_SENSOR_CORE_READ_MODE_COL_BIN2;
+			if (vratio > 1)
+				req_bits |= MT9M114_SENSOR_CORE_READ_MODE_ROW_BIN2;
 			if (hratio > 1)
 				hw_read_mode |= MT9M114_SENSOR_CORE_READ_MODE_COL_BIN2;
 			if (vratio > 1)
@@ -1333,8 +1338,30 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 				goto error;
 			}
 
+			/* CONFIG_CHANGE may clobber 0x3040 on some firmware builds. */
+			ret = cci_read(sensor->regmap, MT9M114_SENSOR_CORE_READ_MODE,
+				       &hw_read_mode, NULL);
+			if (ret) {
+				dev_err(&sensor->client->dev,
+					"start_stream: read hw 0x3040 after reconfig failed: %d\n",
+					ret);
+				goto error;
+			}
+			if ((hw_read_mode & req_bits) != req_bits) {
+				hw_read_mode |= req_bits;
+				ret = cci_write(sensor->regmap,
+						MT9M114_SENSOR_CORE_READ_MODE,
+						hw_read_mode, NULL);
+				if (ret) {
+					dev_err(&sensor->client->dev,
+						"start_stream: re-write hw 0x3040 after reconfig failed: %d\n",
+						ret);
+					goto error;
+				}
+			}
+
 			dev_info(&sensor->client->dev,
-				 "mt9m114: forced hw 0x3040=0x%04llx (hratio=%u vratio=%u), reconfig done\n",
+				 "mt9m114: final hw 0x3040=0x%04llx (hratio=%u vratio=%u), reconfig done\n",
 				 hw_read_mode, hratio, vratio);
 		}
 	}

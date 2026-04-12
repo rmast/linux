@@ -1368,7 +1368,7 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 
 	sensor->streaming = true;
 
-	if (mt9m114_smart_metering && sensor->ifp.ae_auto) {
+	if (mt9m114_smart_metering && sensor->ifp.ae_auto && false) {
 		sensor->ifp.smart_metering_last_switch = 0;
 		sensor->ifp.smart_metering_active_preset =
 			sensor->pa.ae_metering_preset ?
@@ -1742,7 +1742,7 @@ static void mt9m114_smart_metering_work(struct work_struct *work)
 	u8 center_avg;
 	int ret;
 
-	if (!sensor->streaming || !sensor->ifp.ae_auto || !mt9m114_smart_metering)
+	if (!sensor->streaming || !sensor->ifp.ae_auto || !mt9m114_smart_metering || true)
 		return;
 
 	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
@@ -1792,7 +1792,7 @@ out_pm:
 	pm_runtime_put_autosuspend(&sensor->client->dev);
 
 reschedule:
-	if (sensor->streaming && sensor->ifp.ae_auto && mt9m114_smart_metering)
+	if (sensor->streaming && sensor->ifp.ae_auto && mt9m114_smart_metering && false)
 		schedule_delayed_work(&sensor->ifp.smart_meter_work,
 				      msecs_to_jiffies(MT9M114_SMART_METER_INTERVAL_MS));
 }
@@ -2567,7 +2567,7 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 		if (ret)
 			break;
 
-		if (sensor->ifp.ae_auto && sensor->streaming && mt9m114_smart_metering) {
+		if (sensor->ifp.ae_auto && sensor->streaming && mt9m114_smart_metering && false) {
 			sensor->ifp.smart_metering_last_switch = 0;
 			sensor->ifp.smart_metering_active_preset =
 				sensor->pa.ae_metering_preset ?

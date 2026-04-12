@@ -2885,6 +2885,39 @@ static void mt9m114_ifp_update_sel_and_src_fmt(struct v4l2_subdev_state *state)
 	crop = v4l2_subdev_state_get_crop(state, 0);
 	border = mt9m114_ifp_get_border(state);
 
+	/*
+	 * Keep VGA YUV path deterministic: 648x488 sink (with 4px border on each
+	 * side) must always expose exactly 640x480 to userspace.
+	 */
+	if (border == 4 &&
+	    sink_format->width == (MT9M114_PIXEL_ARRAY_WIDTH / 2) &&
+	    sink_format->height == (MT9M114_PIXEL_ARRAY_HEIGHT / 2)) {
+		crop->left = 4;
+		crop->top = 4;
+		crop->width = 640;
+		crop->height = 480;
+		*v4l2_subdev_state_get_compose(state, 0) = (struct v4l2_rect) {
+			.left = 0,
+			.top = 0,
+			.width = 640,
+			.height = 480,
+		};
+		src_format->width = 640;
+		src_format->height = 480;
+
+		if (src_format->code == MEDIA_BUS_FMT_SGRBG10_1X10) {
+			src_format->colorspace = V4L2_COLORSPACE_RAW;
+			src_format->ycbcr_enc = V4L2_YCBCR_ENC_601;
+			src_format->quantization = V4L2_QUANTIZATION_FULL_RANGE;
+		} else {
+			src_format->colorspace = V4L2_COLORSPACE_SRGB;
+			src_format->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
+			src_format->quantization = V4L2_QUANTIZATION_DEFAULT;
+		}
+
+		return;
+	}
+
 	crop->left = border;
 	crop->top = border;
 	crop->width = sink_format->width - 2 * border;
@@ -2970,8 +3003,10 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 		}
 	} else {
 		const struct mt9m114_format_info *info;
+		struct v4l2_mbus_framefmt *sink_fmt_mut;
 		const struct v4l2_mbus_framefmt *sink_fmt;
 		bool summing_mode_hint;
+		bool vga_padded_sink_hint;
 		u32 preferred_code = fmt->format.code;
 
 		/*
@@ -2980,7 +3015,20 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 		 * must not be altered here; the border-aware crop/compose
 		 * recalculation is handled by mt9m114_ifp_update_sel_and_src_fmt.
 		 */
-		sink_fmt = v4l2_subdev_state_get_format(state, 0);
+		sink_fmt_mut = v4l2_subdev_state_get_format(state, 0);
+		sink_fmt = sink_fmt_mut;
+		vga_padded_sink_hint =
+			sink_fmt->width <= (MT9M114_PIXEL_ARRAY_WIDTH / 2 + 4) &&
+			sink_fmt->height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2 + 6);
+
+		/* Ensure the sink is normalized even if source set_fmt arrives first. */
+		if (vga_padded_sink_hint &&
+		    (sink_fmt->width != (MT9M114_PIXEL_ARRAY_WIDTH / 2) ||
+		     sink_fmt->height != (MT9M114_PIXEL_ARRAY_HEIGHT / 2))) {
+			sink_fmt_mut->width = MT9M114_PIXEL_ARRAY_WIDTH / 2;
+			sink_fmt_mut->height = MT9M114_PIXEL_ARRAY_HEIGHT / 2;
+		}
+
 		summing_mode_hint =
 			sink_fmt->width <= (MT9M114_PIXEL_ARRAY_WIDTH / 2) &&
 			sink_fmt->height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2);

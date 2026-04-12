@@ -1519,6 +1519,25 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 	 * abrupt scene changes (e.g. hand-over-lens) can stall capture.
 	 */
 	if (sensor->streaming && binning_mode && sensor->ifp.ae_auto) {
+		u64 hw_read_mode = 0;
+
+		ret = mt9m114_ensure_manual_ae(sensor);
+		if (ret)
+			return ret;
+
+		/* Keep hardware binning latched in runtime auto-AE stream path. */
+		ret = cci_read(sensor->regmap, MT9M114_SENSOR_CORE_READ_MODE,
+			       &hw_read_mode, NULL);
+		if (ret)
+			return ret;
+
+		hw_read_mode |= MT9M114_SENSOR_CORE_READ_MODE_COL_BIN2 |
+				MT9M114_SENSOR_CORE_READ_MODE_ROW_BIN2;
+		ret = cci_write(sensor->regmap, MT9M114_SENSOR_CORE_READ_MODE,
+				hw_read_mode, NULL);
+		if (ret)
+			return ret;
+
 		dev_info_once(&sensor->client->dev,
 			      "mt9m114: bypassing manual exposure writes in VGA auto-AE stream\n");
 		return 0;

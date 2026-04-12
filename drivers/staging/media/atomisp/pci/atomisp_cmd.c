@@ -3709,6 +3709,14 @@ void atomisp_get_padding(struct atomisp_device *isp, u32 width, u32 height,
 	*padding_w = min_t(u32, (native_rect.width - width) & ~1, pad_w);
 	*padding_h = min_t(u32, (native_rect.height - height) & ~1, pad_h);
 
+	/*
+	 * MT9M114 already exposes a border-aware padded YUV mode (e.g. 648x488
+	 * for 640x480 output). Applying the generic ISP2400 minimum padding on
+	 * top of this over-shrinks try_fmt/set_fmt results to 636x474/476.
+	 */
+	if (input->sensor && strstr(input->sensor->name, "mt9m114"))
+		return;
+
 	/* The below minimum padding requirements are for BYT / ISP2400 only */
 	if (IS_ISP2401)
 		return;

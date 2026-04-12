@@ -1052,6 +1052,24 @@ static int mt9m114_configure_ifp(struct mt9m114 *sensor,
 	cci_write(sensor->regmap, MT9M114_CAM_OUTPUT_FORMAT,
 		  output_format, &ret);
 
+	if (!ret) {
+		u64 output_format_rb = 0;
+		int rb_ret;
+
+		rb_ret = cci_read(sensor->regmap, MT9M114_CAM_OUTPUT_FORMAT,
+				  &output_format_rb, NULL);
+		if (rb_ret < 0) {
+			dev_warn(&sensor->client->dev,
+				 "ifp-config: CAM_OUTPUT_FORMAT readback failed (%d), wanted=0x%04llx\n",
+				 rb_ret, output_format);
+		} else {
+			dev_info(&sensor->client->dev,
+				 "ifp-config: CAM_OUTPUT_FORMAT wanted=0x%04llx readback=0x%04llx match=%u\n",
+				 output_format, output_format_rb,
+				 output_format_rb == output_format);
+		}
+	}
+
 	return ret;
 }
 
@@ -2801,9 +2819,31 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 		const struct mt9m114_format_info *info;
 		struct v4l2_rect *compose;
 		struct v4l2_rect *crop;
+		const struct v4l2_mbus_framefmt *sink_fmt;
+		bool summing_mode_hint;
+		u32 preferred_code = fmt->format.code;
 
 		/* Only the media bus code can be changed on the source pad. */
-		info = mt9m114_format_info(sensor, 1, fmt->format.code);
+		sink_fmt = v4l2_subdev_state_get_format(state, 0);
+		summing_mode_hint =
+			sink_fmt->width <= (MT9M114_PIXEL_ARRAY_WIDTH / 2) &&
+			sink_fmt->height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2);
+
+		/*
+		 * In low-resolution summing modes prefer processed YUV over RAW10
+		 * bypass. This matches the intended MT9M114 IFP path for VGA-like
+		 * modes and avoids atomisp configuring a Bayer bypass pipeline.
+		 */
+		if (summing_mode_hint && fmt->format.code == MEDIA_BUS_FMT_SGRBG10_1X10) {
+			preferred_code = sensor->bus_cfg.bus_type == V4L2_MBUS_CSI2_DPHY ?
+				MEDIA_BUS_FMT_UYVY8_1X16 : MEDIA_BUS_FMT_UYVY8_2X8;
+			dev_info(&sensor->client->dev,
+				 "ifp-set-fmt: forcing source code 0x%08x -> 0x%08x (sink=%ux%u)\n",
+				 fmt->format.code, preferred_code,
+				 sink_fmt->width, sink_fmt->height);
+		}
+
+		info = mt9m114_format_info(sensor, 1, preferred_code);
 
 		/* Handle both media bus code and size changes on source pad. */
 		/* If size is requested, update the compose rectangle. */

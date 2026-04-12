@@ -1468,9 +1468,11 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 	u32 frame_length;
 	u32 target_frame_length;
 	u32 line_length;
+	u32 read_mode_bits;
 	u32 hw_gain;
 	u32 hw_vblank;
 	u64 lowlight_frame_length;
+	bool binning_mode;
 	bool lowlight;
 	int ret = 0;
 
@@ -1493,6 +1495,9 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 	line_length = format->width + sensor->pa.hblank->val;
 	if (!line_length)
 		return -EINVAL;
+
+	binning_mode = format->width <= (MT9M114_PIXEL_ARRAY_WIDTH / 2 + 4) &&
+		       format->height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2 + 4);
 
 	frame_length = format->height + sensor->pa.vblank->val;
 	if (sensor->pa.lowlight_active) {
@@ -1520,6 +1525,17 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 	if (target_frame_length > MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX)
 		target_frame_length = MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES_MAX;
 
+	/*
+	 * Keep timing stable in binned streaming mode. Large dynamic frame-length
+	 * swings (low-light path) can stall some AtomISP pipelines on scene cuts.
+	 */
+	if (sensor->streaming && binning_mode) {
+		target_frame_length = frame_length;
+		requested_exposure = min_t(u32, requested_exposure,
+					  target_frame_length > 2 ?
+					  target_frame_length - 2 : 1);
+	}
+
 	hw_vblank = clamp_t(u32, target_frame_length - format->height,
 			    MT9M114_MIN_VBLANK, MT9M114_MAX_VBLANK_LOWLIGHT);
 	hw_gain = lowlight ? max_t(u32, requested_gain >> 2, 1) : requested_gain;
@@ -1538,14 +1554,22 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 	if (ret)
 		return ret;
 
+	read_mode_bits = lowlight ?
+		(MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_SUMMING |
+		 MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_SUMMING) :
+		(MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_NORMAL |
+		 MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_NORMAL);
+
+	/* In VGA/binning streaming mode we keep summing fixed at runtime. */
+	if (sensor->streaming && binning_mode)
+		read_mode_bits = MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_SUMMING |
+				 MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_SUMMING;
+
 	ret = cci_update_bits(sensor->regmap,
 			      MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
 			      MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_MASK |
 			      MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_MASK,
-			      lowlight ? (MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_SUMMING |
-					  MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_SUMMING)
-				       : (MT9M114_CAM_SENSOR_CONTROL_X_READ_OUT_NORMAL |
-					  MT9M114_CAM_SENSOR_CONTROL_Y_READ_OUT_NORMAL),
+			      read_mode_bits,
 			      NULL);
 	if (ret)
 		goto out_group_hold;

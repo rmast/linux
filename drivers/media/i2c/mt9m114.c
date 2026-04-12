@@ -67,6 +67,10 @@
 #define MT9M114_RESET_REGISTER				CCI_REG16(0x301a)
 #define MT9M114_RESET_REGISTER_LOCK_REG				BIT(3)
 #define MT9M114_RESET_REGISTER_MASK_BAD				BIT(9)
+/* Physical sensor read-mode register (hardware, not firmware mailbox 0xC834) */
+#define MT9M114_SENSOR_CORE_READ_MODE			CCI_REG16(0x3040)
+#define MT9M114_SENSOR_CORE_READ_MODE_COL_BIN2			BIT(6)  /* 2x column binning */
+#define MT9M114_SENSOR_CORE_READ_MODE_ROW_BIN2			BIT(10) /* 2x row binning */
 #define MT9M114_FLASH					CCI_REG16(0x3046)
 #define MT9M114_GREEN1_GAIN				CCI_REG16(0x3056)
 #define MT9M114_BLUE_GAIN				CCI_REG16(0x3058)
@@ -1273,6 +1277,38 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 			 "read_mode=0x%04llx cpipe_last=%llu line_len=%llu frame_len=%llu\n",
 			 out_fmt, out_w, out_h, read_mode, cpipe_last, line_len,
 			 frame_len);
+	}
+
+	/*
+	 * The MT9M114 firmware clears CAM_SENSOR_CONTROL_READ_MODE (0xC834)
+	 * after CONFIG_CHANGE, and often does not correctly set the hardware
+	 * binning bits in register 0x3040.  Force the hardware bits directly
+	 * based on the PA crop/format ratios so summing (full-FOV 2×2 binning)
+	 * is actually applied by the sensor array.
+	 */
+	{
+		const struct v4l2_mbus_framefmt *pa_fmt =
+			v4l2_subdev_state_get_format(pa_state, 0);
+		const struct v4l2_rect *pa_crop =
+			v4l2_subdev_state_get_crop(pa_state, 0);
+		unsigned int hratio = pa_fmt->width  ? pa_crop->width  / pa_fmt->width  : 1;
+		unsigned int vratio = pa_fmt->height ? pa_crop->height / pa_fmt->height : 1;
+
+		if (hratio > 1 || vratio > 1) {
+			u64 hw_read_mode = 0;
+
+			cci_read(sensor->regmap, MT9M114_SENSOR_CORE_READ_MODE,
+				 &hw_read_mode, NULL);
+			if (hratio > 1)
+				hw_read_mode |= MT9M114_SENSOR_CORE_READ_MODE_COL_BIN2;
+			if (vratio > 1)
+				hw_read_mode |= MT9M114_SENSOR_CORE_READ_MODE_ROW_BIN2;
+			cci_write(sensor->regmap, MT9M114_SENSOR_CORE_READ_MODE,
+				  hw_read_mode, NULL);
+			dev_info(&sensor->client->dev,
+				 "mt9m114: forced hw 0x3040=0x%04llx (hratio=%u vratio=%u)\n",
+				 hw_read_mode, hratio, vratio);
+		}
 	}
 
 	sensor->streaming = true;

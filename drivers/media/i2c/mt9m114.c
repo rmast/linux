@@ -3068,6 +3068,29 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 		} else {
 			format->code = info->code;
 		}
+
+		/*
+		 * Make source negotiation deterministic for VGA padded requests:
+		 * always expose exactly 640x480 on YUV source in this mode.
+		 */
+		if (format->code != MEDIA_BUS_FMT_SGRBG10_1X10 &&
+		    vga_padded_sink_hint) {
+			struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+			struct v4l2_rect *compose = v4l2_subdev_state_get_compose(state, 0);
+
+			crop->left = 4;
+			crop->top = 4;
+			crop->width = 640;
+			crop->height = 480;
+
+			compose->left = 0;
+			compose->top = 0;
+			compose->width = 640;
+			compose->height = 480;
+
+			format->width = 640;
+			format->height = 480;
+		}
 	}
 
 	fmt->format = *format;

@@ -1524,7 +1524,7 @@ static int mt9m114_apply_exposure_params(struct v4l2_subdev *sd, s32 gain,
 		return -EINVAL;
 
 	binning_mode = format->width <= (MT9M114_PIXEL_ARRAY_WIDTH / 2 + 4) &&
-		       format->height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2 + 4);
+		       format->height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2 + 6);
 
 	/*
 	 * In active VGA/binning streams with auto-AE, avoid manual exposure
@@ -2089,7 +2089,7 @@ static int mt9m114_pa_set_fmt(struct v4l2_subdev *sd,
 	 * full-array crop so the PA can engage 2x summing and keep full FOV.
 	 */
 	vga_binning_hint = fmt->format.width <= (MT9M114_PIXEL_ARRAY_WIDTH / 2 + 4) &&
-			     fmt->format.height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2 + 4);
+			     fmt->format.height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2 + 6);
 	if (vga_binning_hint) {
 		crop->left = 0;
 		crop->top = 0;
@@ -2933,7 +2933,7 @@ static int mt9m114_ifp_set_fmt(struct v4l2_subdev *sd,
 		 */
 		vga_binning_mode =
 			width <= (MT9M114_PIXEL_ARRAY_WIDTH / 2 + 4) &&
-			height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2 + 4);
+			height <= (MT9M114_PIXEL_ARRAY_HEIGHT / 2 + 6);
 		if (vga_binning_mode) {
 			width = MT9M114_PIXEL_ARRAY_WIDTH / 2;
 			height = MT9M114_PIXEL_ARRAY_HEIGHT / 2;

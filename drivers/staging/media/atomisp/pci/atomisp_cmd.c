@@ -96,6 +96,66 @@ static unsigned short atomisp_get_sensor_fps(struct atomisp_sub_device *asd)
 	return fps;
 }
 
+static unsigned int atomisp_hflip_bayer_order(unsigned int bayer_order)
+{
+	switch (bayer_order) {
+	case IA_CSS_BAYER_ORDER_RGGB:
+		return IA_CSS_BAYER_ORDER_GRBG;
+	case IA_CSS_BAYER_ORDER_BGGR:
+		return IA_CSS_BAYER_ORDER_GBRG;
+	case IA_CSS_BAYER_ORDER_GRBG:
+		return IA_CSS_BAYER_ORDER_RGGB;
+	case IA_CSS_BAYER_ORDER_GBRG:
+		return IA_CSS_BAYER_ORDER_BGGR;
+	default:
+		return bayer_order;
+	}
+}
+
+static unsigned int atomisp_vflip_bayer_order(unsigned int bayer_order)
+{
+	switch (bayer_order) {
+	case IA_CSS_BAYER_ORDER_RGGB:
+		return IA_CSS_BAYER_ORDER_GBRG;
+	case IA_CSS_BAYER_ORDER_BGGR:
+		return IA_CSS_BAYER_ORDER_GRBG;
+	case IA_CSS_BAYER_ORDER_GRBG:
+		return IA_CSS_BAYER_ORDER_BGGR;
+	case IA_CSS_BAYER_ORDER_GBRG:
+		return IA_CSS_BAYER_ORDER_RGGB;
+	default:
+		return bayer_order;
+	}
+}
+
+static unsigned int
+atomisp_get_effective_bayer_order(struct atomisp_input_subdev *input,
+				  unsigned int bayer_order)
+{
+	struct v4l2_control ctrl = { 0 };
+	bool hflip = false;
+	bool vflip = false;
+
+	if (!input->sensor || !input->sensor->ctrl_handler)
+		return bayer_order;
+
+	ctrl.id = V4L2_CID_HFLIP;
+	if (!v4l2_g_ctrl(input->sensor->ctrl_handler, &ctrl))
+		hflip = !!ctrl.value;
+
+	ctrl.id = V4L2_CID_VFLIP;
+	if (!v4l2_g_ctrl(input->sensor->ctrl_handler, &ctrl))
+		vflip = !!ctrl.value;
+
+	if (hflip)
+		bayer_order = atomisp_hflip_bayer_order(bayer_order);
+
+	if (vflip)
+		bayer_order = atomisp_vflip_bayer_order(bayer_order);
+
+	return bayer_order;
+}
+
 /*
  * DFS progress is shown as follows:
  * 1. Target frequency is calculated according to FPS/Resolution/ISP running
@@ -3563,6 +3623,7 @@ void atomisp_get_padding(struct atomisp_device *isp, u32 width, u32 height,
 	struct atomisp_input_subdev *input = &isp->inputs[isp->asd.input_curr];
 	struct v4l2_rect native_rect = input->native_rect;
 	const struct atomisp_in_fmt_conv *fc = NULL;
+	unsigned int bayer_order;
 	u32 min_pad_w = ISP2400_MIN_PAD_W;
 	u32 min_pad_h = ISP2400_MIN_PAD_H;
 	struct v4l2_mbus_framefmt *sink;
@@ -3602,12 +3663,14 @@ void atomisp_get_padding(struct atomisp_device *isp, u32 width, u32 height,
 	 * The ISP only supports GRBG for other bayer-orders additional padding
 	 * is used so that the raw sensor data can be cropped to fix the order.
 	 */
-	if (fc->bayer_order == IA_CSS_BAYER_ORDER_RGGB ||
-	    fc->bayer_order == IA_CSS_BAYER_ORDER_GBRG)
+	bayer_order = atomisp_get_effective_bayer_order(input, fc->bayer_order);
+
+	if (bayer_order == IA_CSS_BAYER_ORDER_RGGB ||
+	    bayer_order == IA_CSS_BAYER_ORDER_GBRG)
 		min_pad_w += 2;
 
-	if (fc->bayer_order == IA_CSS_BAYER_ORDER_BGGR ||
-	    fc->bayer_order == IA_CSS_BAYER_ORDER_GBRG)
+	if (bayer_order == IA_CSS_BAYER_ORDER_BGGR ||
+	    bayer_order == IA_CSS_BAYER_ORDER_GBRG)
 		min_pad_h += 2;
 
 apply_min_padding:
@@ -3952,6 +4015,8 @@ static inline int atomisp_set_sensor_mipi_to_isp(
 		input_format = fc->atomisp_in_fmt;
 		bayer_order = fc->bayer_order;
 	}
+
+	bayer_order = atomisp_get_effective_bayer_order(input, bayer_order);
 
 	atomisp_css_input_set_format(asd, stream_id, input_format);
 	atomisp_css_input_set_bayer_order(asd, stream_id, bayer_order);

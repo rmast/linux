@@ -389,6 +389,7 @@ struct mt9m114 {
 	struct gpio_desc *reset;
 	struct regulator_bulk_data supplies[3];
 	struct v4l2_fwnode_endpoint bus_cfg;
+	struct v4l2_fwnode_device_properties fwnode_props;
 	bool bypass_pll;
 
 	struct aptina_pll pll;
@@ -407,6 +408,8 @@ struct mt9m114 {
 		struct v4l2_ctrl *gain;
 		struct v4l2_ctrl *hblank;
 		struct v4l2_ctrl *vblank;
+		struct v4l2_ctrl *hflip;
+		struct v4l2_ctrl *vflip;
 	} pa;
 
 	/* Image Flow Processor */
@@ -1444,12 +1447,16 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 			  sensor->pixrate, sensor->pixrate, 1,
 			  sensor->pixrate);
 
-	v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops,
-			  V4L2_CID_HFLIP,
-			  0, 1, 1, 0);
-	v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops,
-			  V4L2_CID_VFLIP,
-			  0, 1, 1, 0);
+	sensor->pa.hflip =
+		v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops, V4L2_CID_HFLIP,
+				  0, 1, 1,
+				  sensor->fwnode_props.rotation == 180 ? 1 : 0);
+	sensor->pa.vflip =
+		v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops, V4L2_CID_VFLIP,
+				  0, 1, 1,
+				  sensor->fwnode_props.rotation == 180 ? 1 : 0);
+
+	v4l2_ctrl_new_fwnode_properties(hdl, &mt9m114_pa_ctrl_ops, &sensor->fwnode_props);
 
 	if (hdl->error) {
 		ret = hdl->error;
@@ -2555,6 +2562,22 @@ read_slew_rate:
 	sensor->pad_slew_rate = MT9M114_PAD_SLEW_DEFAULT;
 	device_property_read_u32(&sensor->client->dev, "slew-rate",
 				 &sensor->pad_slew_rate);
+
+	ret = v4l2_fwnode_device_parse(&sensor->client->dev, &sensor->fwnode_props);
+	if (ret < 0) {
+		dev_err(&sensor->client->dev,
+			"Failed to parse fwnode properties\n");
+		return ret;
+	}
+
+	if (sensor->fwnode_props.rotation != V4L2_FWNODE_PROPERTY_UNSET &&
+	    sensor->fwnode_props.rotation != 0 &&
+	    sensor->fwnode_props.rotation != 180) {
+		dev_warn(&sensor->client->dev,
+			 "Unsupported rotation %u, only 0/180 are valid\n",
+			 sensor->fwnode_props.rotation);
+		sensor->fwnode_props.rotation = 0;
+	}
 
 	if (sensor->pad_slew_rate < MT9M114_PAD_SLEW_MIN ||
 	    sensor->pad_slew_rate > MT9M114_PAD_SLEW_MAX) {

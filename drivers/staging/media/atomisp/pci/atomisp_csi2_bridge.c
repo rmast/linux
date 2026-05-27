@@ -82,6 +82,12 @@ static struct gmin_cfg_var xiaomi_mipad2_vars[] = {
 	{}
 };
 
+static struct gmin_cfg_var hp_x2_210_vars[] = {
+	/* MT9M114/Unicam m1040 is physically mounted upside-down on this model */
+	{ "INT33F0:00", "Rotation", "180" },
+	{},
+};
+
 static const struct dmi_system_id gmin_cfg_dmi_overrides[] = {
 	{
 		/* Lenovo Ideapad Miix 310 */
@@ -98,6 +104,14 @@ static const struct dmi_system_id gmin_cfg_dmi_overrides[] = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "Mipad2"),
 		},
 		.driver_data = xiaomi_mipad2_vars,
+	},
+	{
+		/* HP x2 210 G1 (Cherry Trail) */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Hewlett-Packard"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "HP x2 210"),
+		},
+		.driver_data = hp_x2_210_vars,
 	},
 	{}
 };
@@ -367,7 +381,7 @@ static int atomisp_csi2_parse_sensor_fwnode(struct acpi_device *adev,
 					    struct ipu_sensor *sensor)
 {
 	const struct acpi_device_id *id;
-	int ret, clock_num;
+	int ret, clock_num, rotation;
 	bool vcm = false;
 	int lanes = 1;
 
@@ -411,7 +425,13 @@ static int atomisp_csi2_parse_sensor_fwnode(struct acpi_device *adev,
 		return ret;
 
 	sensor->mclkspeed = PMC_CLK_RATE_19_2MHZ;
-	sensor->rotation = 0;
+	rotation = gmin_cfg_get_int(adev, "Rotation", 0);
+	if (rotation != 0 && rotation != 180) {
+		acpi_handle_warn(adev->handle, "%s: Invalid Rotation=%d, using 0\n",
+				 dev_name(&adev->dev), rotation);
+		rotation = 0;
+	}
+	sensor->rotation = rotation;
 	sensor->orientation = (sensor->link == 1) ?
 		V4L2_FWNODE_ORIENTATION_BACK : V4L2_FWNODE_ORIENTATION_FRONT;
 

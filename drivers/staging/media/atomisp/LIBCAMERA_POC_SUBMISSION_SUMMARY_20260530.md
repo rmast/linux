@@ -18,6 +18,7 @@ This summary captures the latest rerun status for the AtomISP + MT9M114 libcamer
 - Test 6 (control baseline): PASS
 - Test 7 (GStreamer regression): PASS
 - Test 8 (libcamera discovery/capture): PASS (camera registered and single-frame capture completed)
+- Test 9 (real-life visual preview quality): PASS (stable live preview, correct color/aspect reported)
 
 ## Important Note About Test 4
 
@@ -34,6 +35,8 @@ Latest PoC run on T100TA shows:
 - camera registration succeeds (camera added by simple pipeline)
 - `cam --list` shows the mt9m114 camera
 - `cam -c1 -C1 ...` completes a one-frame capture
+- real-life preview path reached stable adjusted stream at 1280x960 NV21 for requested 1248x928
+- visual verification on device reported color and aspect ratio were correct, without visible binning artifact
 
 Platform caveat:
 
@@ -57,6 +60,9 @@ Platform caveat:
 - 545baa2ff22e - add PoC docs, script, and baseline logs
 - 2de561b2a310 - harden stream-loop detection and update test4 report
 - 4393df18573e - refresh PoC logs with 20260530 rerun results
+- cdad9206 - fallback when v4l2 media-bus code filtering is unavailable
+- 72e46da2 - add atomisp extended mode probing fallback
+- a482e064 - consider atomisp video size ranges in probing
 
 ## Ready-To-Send Position
 

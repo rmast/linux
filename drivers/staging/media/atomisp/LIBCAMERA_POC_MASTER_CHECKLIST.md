@@ -63,7 +63,12 @@ References:
 - [ ] Decide submission timing to linux-media
 - [ ] Optionally perform one extra confirmation rerun before sending
 - [x] Start implementation track for closing libcamera discovery gap
-- [ ] Real-life visual preview test with libcamera-based software on T100TA (qcam and/or gstreamer libcamerasrc)
+- [x] Real-life visual preview test with libcamera-based software on T100TA (qcam and/or gstreamer libcamerasrc)
+
+Latest real-life visual status:
+- PASS on libcamera v0.7.1+52-a482e064
+- observed stable preview at adjusted 1280x960 NV21
+- user-verified color and aspect ratio were correct, with no visible binning artifact
 
 Reference:
 - drivers/staging/media/atomisp/LIBCAMERA_REAL_LIFE_VISUAL_TEST.md
@@ -84,6 +89,11 @@ Status against drivers/staging/media/atomisp/TODO MUST list:
 - 2de561b2a310: harden stream-loop detection and update test4 report
 - 4393df18573e: refresh PoC logs with 20260530 rerun results
 - 14821fb298b6: add 20260530 PoC submission summary
+
+Current libcamera PoC baseline branch commits (latest first):
+- a482e064: pipeline: simple: consider atomisp video size ranges in probing
+- 72e46da2: pipeline: simple: add atomisp extended mode probing fallback
+- cdad9206: pipeline: simple: fallback when v4l2 code filtering is unavailable
 
 ## Usage Notes
 

@@ -17,7 +17,7 @@ This summary captures the latest rerun status for the AtomISP + MT9M114 libcamer
 - Test 5 (module unload/reload + reprobe): PASS
 - Test 6 (control baseline): PASS
 - Test 7 (GStreamer regression): PASS
-- Test 8 (libcamera discovery): FAIL (no camera exposed yet)
+- Test 8 (libcamera discovery/capture): PASS (camera registered and single-frame capture completed)
 
 ## Important Note About Test 4
 
@@ -26,6 +26,19 @@ On this setup, direct `v4l2-ctl` stream methods (`--stream-mmap` / `--stream-use
 The PoC script now treats these ioctl messages as hard method failures and falls back to a one-buffer GStreamer capture path.
 
 Observed rerun behavior: cycles report OK via `gst-fallback`.
+
+## Important Note About Libcamera PoC
+
+Latest PoC run on T100TA shows:
+
+- camera registration succeeds (camera added by simple pipeline)
+- `cam --list` shows the mt9m114 camera
+- `cam -c1 -C1 ...` completes a one-frame capture
+
+Platform caveat:
+
+- enabling frame-start events on Atom ISP returns `-EINVAL`
+- the simple pipeline fallback path continues without frame-start events and capture still works for PoC
 
 ## Log Set Used In This Rerun
 
@@ -47,5 +60,7 @@ Observed rerun behavior: cycles report OK via `gst-fallback`.
 
 ## Ready-To-Send Position
 
-The kernel topology and V4L2/GStreamer path are in a reviewable state for this PoC.
-libcamera discovery remains the open gap and is explicitly reported as such.
+The kernel topology, V4L2/GStreamer path, and libcamera PoC discovery/capture are in a reviewable state for this PoC.
+
+This satisfies the libcamera PoC gating requirement called out in `drivers/staging/media/atomisp/TODO`.
+Other TODO MUST items in that file are still open and are not covered by this PoC summary.

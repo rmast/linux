@@ -36,11 +36,12 @@ References:
 - [x] Test 5: module unload/reload and reprobe
 - [x] Test 6: control baseline
 - [x] Test 7: GStreamer regression
-- [ ] Test 8: libcamera discovery/capture (still open gap)
+- [x] Test 8: libcamera discovery/capture
 
 Current interpretation:
 - Kernel topology and V4L2/GStreamer path: validated for PoC
-- libcamera discovery: not yet available on this stack
+- libcamera discovery and single-frame capture: validated for PoC
+- frame-start events on Atom ISP return -EINVAL on this platform; simple pipeline now falls back and continues streaming
 
 References:
 - drivers/staging/media/atomisp/atomisp_poc_test_20260530_122049/
@@ -61,7 +62,21 @@ References:
 
 - [ ] Decide submission timing to linux-media
 - [ ] Optionally perform one extra confirmation rerun before sending
-- [ ] Start implementation track for closing libcamera discovery gap
+- [x] Start implementation track for closing libcamera discovery gap
+- [ ] Real-life visual preview test with libcamera-based software on T100TA (qcam and/or gstreamer libcamerasrc)
+
+Reference:
+- drivers/staging/media/atomisp/LIBCAMERA_REAL_LIFE_VISUAL_TEST.md
+
+## AtomISP Staging TODO MUST Status Snapshot
+
+Status against drivers/staging/media/atomisp/TODO MUST list:
+
+- [ ] Remove/disable private IOCTLs
+- [ ] Remove/disable custom v4l2-ctrls
+- [ ] Remove unnecessary/unwanted module parameters
+- [ ] Remove abuse of priv field in various v4l2 userspace API structs
+- [x] PoC-level libcamera integration readiness for staging-exit planning (camera discovery + basic capture validated)
 
 ## Commit Trail (Current)
 

@@ -16,11 +16,14 @@ Result summary:
 - Graph discovery: PASS
 - 1280x720 negotiation: PASS
 - 1280x960 negotiation: PASS
-- Stream loop test: WARN (automation did not yield a clean pass counter)
+- Stream loop test: PASS (with documented gst fallback on unsupported v4l2-ctl stream ioctls)
 - Module unload/reload and reprobe: PASS
 - Control baseline: PASS
 - GStreamer regression: PASS
-- libcamera discovery: FAIL (no camera registered / Camera 0 not found)
+- libcamera discovery/capture: PASS (camera registered and single-frame capture completed)
+
+Known caveat:
+- On this platform, enabling frame-start events on Atom ISP returns -EINVAL; PoC uses a fallback path and capture proceeds.
 
 Attached:
 - completed PoC report form
@@ -55,8 +58,11 @@ Summary:
 - Reprobe path (module unload/reload + stream after reprobe): PASS
 - Baseline controls: PASS
 - GStreamer pipeline behavior: PASS (clean EOS)
-- Stream loop automation: WARN (counter logic did not produce a clean pass number)
-- libcamera discovery/capture: FAIL (no camera exposed to libcamera yet)
+- Stream loop automation: PASS (gst fallback path on unsupported v4l2-ctl stream ioctls)
+- libcamera discovery/capture: PASS (camera exposed and basic frame capture works)
+
+Known caveat:
+- Frame-start event enabling on Atom ISP returns -EINVAL on this platform; a fallback path is used and streaming continues.
 
 I attached:
 1) completed report form,
@@ -65,7 +71,7 @@ I attached:
 
 The report explicitly separates published upstream commits from local test-only changes.
 
-I am holding final submission until one more internal positive run, but I can submit this set as-is if that is preferred.
+The libcamera PoC gating item from the atomisp staging TODO now has a working proof-of-concept result on this hardware. Other staging TODO MUST items are tracked separately and are not claimed solved by this report.
 
 Thanks,
 Rik
@@ -74,5 +80,5 @@ Rik
 ## Optional Follow-Up Reply (if asked "why no libcamera camera yet?")
 
 ```text
-Current results show the kernel topology and V4L2/GStreamer path are mostly healthy, but libcamera still does not discover an operational camera on this stack. So this is not presented as full libcamera support yet; it is a status report showing what is validated and where the remaining gap is.
+Current results show a working PoC path for libcamera discovery and basic capture on the tested T100TA setup. This addresses the staging TODO requirement that PoC-level libcamera integration be ready before discussing staging exit. Other atomisp staging TODO MUST items remain open and are tracked separately.
 ```

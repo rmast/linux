@@ -70,7 +70,7 @@ Fill in the result for each test: **PASS**, **FAIL**, **SKIP**, or **WARN**.
 | 5 | Module Unload/Reload | **PASS** | Reprobe and subsequent stream succeeded |
 | 6 | Control Baseline | **PASS** | Standard V4L2 controls were accessible |
 | 7 | GStreamer Regression | **PASS** | EOS reached cleanly, no error output |
-| 8 | Libcamera Discovery | **FAIL** | No camera registered with libcamera on this stack |
+| 8 | Libcamera Discovery | **PASS** | Camera discovered and 1-frame capture completed with frame-start fallback warning |
 
 ---
 
@@ -270,15 +270,12 @@ Image Processing Controls
 ### Test 8: Libcamera PoC
 **Expected:** Camera discovered, basic capture works  
 **Observed:** 
-[0:58:02.499066729] [5828]  INFO Camera camera_manager.cpp:340 libcamera v0.7.1
-Camera 0 not found
-Failed to create camera session
+[3:40:42.395229045] [8518]  INFO Camera camera_manager.cpp:340 libcamera v0.7.1+42-6b167f90-dirty
+[3:40:42.437987915] [8519]  INFO Camera camera_manager.cpp:223 Adding camera '\_SB_.I2C4.CAM0' for pipeline handler simple
+cam0: Capture 1 frames
+13242.825406 (0.00 fps) cam0-stream0 seq: 000000 bytesused: 1187840/593920
 
-[0:58:02.427125398] [5820]  INFO Camera camera_manager.cpp:340 libcamera v0.7.1
-Available cameras:
-
-
-**Issue/Note:** [FILL if any]
+**Issue/Note:** `setFrameStartEnabled()` on Atom ISP returns `-EINVAL` on this platform; PoC uses a fallback to continue without frame-start events, and discovery plus single-frame capture succeeds.
 
 ---
 

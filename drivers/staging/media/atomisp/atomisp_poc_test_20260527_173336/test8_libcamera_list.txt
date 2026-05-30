@@ -1,0 +1,2 @@
+[0:58:02.427125398] [5820]  INFO Camera camera_manager.cpp:340 libcamera v0.7.1
+Available cameras:

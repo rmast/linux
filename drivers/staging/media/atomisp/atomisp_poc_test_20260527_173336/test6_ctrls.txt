@@ -1,0 +1,11 @@
+error 22 getting ctrl Automatic White Balance
+error 22 getting ctrl Red Balance
+error 22 getting ctrl Blue Balance
+error 22 getting ctrl Gamma
+             image_color_effect 0x0098091f (int)    : min=0 max=9 step=1 default=0 value=0
+error 22 getting ctrl Bad Pixel Correction
+error 22 getting ctrl GDC/CAC
+error 22 getting ctrl Video Stabilization
+error 22 getting ctrl Fixed Pattern Noise Reduction
+error 22 getting ctrl False Color Correction
+error 22 getting ctrl Low light mode

@@ -183,11 +183,51 @@ else
         echo "SKIP: No /dev/video* found"
     else
         echo "Running 20 start/stop cycles (capture timeout 1s per iteration):"
-        for i in {1..20}; do
-            echo -n "  Cycle $i: "
-            # Try a brief stream capture
-            v4l2-ctl -d "$VIDEO_DEV" --stream-mmap --stream-count=1 --stream-to=/dev/null 2>&1 | grep -q "1 frames" && echo "OK" || echo "WARN/SKIP"
-        done | tee "$LOG_DIR/test4_stream_cycles.txt"
+        {
+            has_ioctl_error() {
+                echo "$1" | grep -Eq "VIDIOC_[A-Z_]+ returned -1|Inappropriate ioctl for device|Invalid argument"
+            }
+
+            for i in {1..20}; do
+                echo "  Cycle $i:"
+
+                # Try mmap first, then userptr if CREATE_BUFS is unsupported.
+                cycle_method="v4l2-mmap"
+                cycle_out=$(v4l2-ctl -d "$VIDEO_DEV" --stream-mmap --stream-count=1 --stream-to=/dev/null 2>&1)
+                cycle_rc=$?
+
+                if has_ioctl_error "$cycle_out"; then
+                    cycle_rc=1
+                fi
+
+                if [ $cycle_rc -ne 0 ]; then
+                    cycle_method="v4l2-userptr"
+                    cycle_out=$(v4l2-ctl -d "$VIDEO_DEV" --stream-user --stream-count=1 --stream-to=/dev/null 2>&1)
+                    cycle_rc=$?
+
+                    if has_ioctl_error "$cycle_out"; then
+                        cycle_rc=1
+                    fi
+                fi
+
+                # Last fallback: one-buffer GStreamer capture, if available.
+                if [ $cycle_rc -ne 0 ] && command -v gst-launch-1.0 &> /dev/null; then
+                    cycle_method="gst-fallback"
+                    cycle_out=$(gst-launch-1.0 -q v4l2src device="$VIDEO_DEV" num-buffers=1 ! fakesink 2>&1)
+                    cycle_rc=$?
+                fi
+
+                if [ $cycle_rc -eq 0 ]; then
+                    echo "    Result: OK ($cycle_method)"
+                else
+                    echo "    Result: WARN/SKIP ($cycle_method rc=$cycle_rc)"
+                fi
+
+                if [ -n "$cycle_out" ]; then
+                    echo "$cycle_out" | sed 's/^/    output: /'
+                fi
+            done
+        } | tee "$LOG_DIR/test4_stream_cycles.txt"
         echo ""
     fi
 fi

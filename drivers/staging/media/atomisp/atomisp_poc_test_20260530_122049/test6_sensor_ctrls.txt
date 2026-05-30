@@ -5,20 +5,12 @@ User Controls
                 horizontal_flip 0x00980914 (bool)   : default=0 value=0 flags=has-min-max
                   vertical_flip 0x00980915 (bool)   : default=0 value=0 flags=has-min-max
 
-Camera Controls
-
-             camera_orientation 0x009a0922 (menu)   : min=0 max=2 default=0 value=0 (Front) flags=read-only, has-min-max
-         camera_sensor_rotation 0x009a0923 (int)    : min=0 max=0 step=1 default=0 value=0 flags=read-only, has-min-max
-
 Image Source Controls
 
-              vertical_blanking 0x009e0901 (int)    : min=21 max=28949 step=1 default=21 value=21 flags=volatile, has-min-max
+              vertical_blanking 0x009e0901 (int)    : min=21 max=64559 step=1 default=21 value=21 flags=has-min-max
             horizontal_blanking 0x009e0902 (int)    : min=303 max=6895 step=1 default=308 value=308 flags=has-min-max
                   analogue_gain 0x009e0903 (int)    : min=1 max=511 step=1 default=32 value=32 flags=volatile, has-min-max
 
 Image Processing Controls
 
                      pixel_rate 0x009f0902 (int64)  : min=48000000 max=48000000 step=1 default=48000000 value=48000000 flags=read-only, has-min-max
-             ae_metering_preset 0x009f0983 (menu)   : min=0 max=3 default=0 value=0 (Center-Weighted) flags=has-min-max
-                 ae_track_speed 0x009f0984 (int)    : min=0 max=7 step=1 default=0 value=0 flags=slider, has-min-max
-              ae_algorithm_mode 0x009f0985 (menu)   : min=0 max=3 default=0 value=0 (Average Brightness) flags=has-min-max

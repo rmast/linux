@@ -1,3 +1,0 @@
-[0:58:02.499066729] [5828]  INFO Camera camera_manager.cpp:340 libcamera v0.7.1
-Camera 0 not found
-Failed to create camera session

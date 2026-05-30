@@ -21,9 +21,13 @@ Result summary:
 - Control baseline: PASS
 - GStreamer regression: PASS
 - libcamera discovery/capture: PASS (camera registered and single-frame capture completed)
+- real-life visual preview quality: PASS (stable preview; requested 1248x928 adjusted to 1280x960)
 
 Known caveat:
 - On this platform, enabling frame-start events on Atom ISP returns -EINVAL; PoC uses a fallback path and capture proceeds.
+
+Validated baseline for this result set:
+- libcamera v0.7.1+52-a482e064
 
 Attached:
 - completed PoC report form
@@ -60,9 +64,13 @@ Summary:
 - GStreamer pipeline behavior: PASS (clean EOS)
 - Stream loop automation: PASS (gst fallback path on unsupported v4l2-ctl stream ioctls)
 - libcamera discovery/capture: PASS (camera exposed and basic frame capture works)
+- real-life visual preview quality: PASS (stable image path; adjusted stream observed at 1280x960 NV21)
 
 Known caveat:
 - Frame-start event enabling on Atom ISP returns -EINVAL on this platform; a fallback path is used and streaming continues.
+
+Validated baseline for this result set:
+- libcamera v0.7.1+52-a482e064
 
 I attached:
 1) completed report form,

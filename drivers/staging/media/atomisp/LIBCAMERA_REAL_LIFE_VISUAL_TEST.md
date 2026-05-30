@@ -8,6 +8,21 @@ This guide validates a real GUI/video preview path using software that depends o
 
 Show a live camera image (not just enumerate or single-frame capture) on ASUS T100TA using the PoC libcamera build.
 
+## Current Status
+
+PASS on ASUS T100TA with libcamera v0.7.1+52-a482e064.
+
+Observed in latest run:
+
+- Preview quality visually good (color and aspect ratio reported correct).
+- No visible binning artifact in the displayed image.
+- Requested 1248x928 was adjusted to 1280x960 and streamed stably.
+
+Representative log indicators:
+
+- `Picked ... -> 1280x960-NV21`
+- `Stream configuration adjusted to  1280x960-NV21/sYCC`
+
 ## Preconditions
 
 - Use the latest PoC bundle from this workstream (at least v7 with frame-start fallback).
@@ -35,6 +50,7 @@ Important:
 
 - If the version string does not show the latest commit, you are not testing the newest bundle.
 - For color-preview fixes, use v8 or newer.
+- For the current validated real-life baseline, use v16 (commit a482e064) or newer.
 
 ## Reset qcam Persisted State
 

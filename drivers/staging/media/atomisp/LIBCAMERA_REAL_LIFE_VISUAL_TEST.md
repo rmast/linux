@@ -31,6 +31,23 @@ export LIBCAMERA_LOG_LEVELS=SimplePipeline:INFO,Camera:INFO
 
 Expected: version string includes the latest PoC commit from this branch.
 
+Important:
+
+- If the version string does not show the latest commit, you are not testing the newest bundle.
+- For color-preview fixes, use v8 or newer.
+
+## Reset qcam Persisted State
+
+qcam can remember the previously used stream settings and may reopen with an unsuitable size/aspect profile.
+
+Before retesting, clear qcam settings once:
+
+```bash
+rm -f ~/.config/libcamera.org/qcam.conf
+```
+
+Then start qcam again with an explicit stream request.
+
 ## Visual Test A: qcam (preferred)
 
 If `qcam` is available in your runtime:
@@ -43,6 +60,12 @@ If camera ID selection is not needed:
 
 ```bash
 qcam
+```
+
+Recommended explicit stream for this platform:
+
+```bash
+qcam --camera "\\_SB_.I2C4.CAM0" --stream "width=1248,height=928"
 ```
 
 Expected:
@@ -63,6 +86,8 @@ If `qcam` is unavailable, use gstreamer with libcamera source:
 ```bash
 gst-launch-1.0 libcamerasrc ! videoconvert ! autovideosink
 ```
+
+If you get `no element "libcamerasrc"`, your current libcamera build was created with gstreamer support disabled. In that case use qcam/cam for validation, or rebuild libcamera with gstreamer enabled.
 
 Optional fixed size request:
 

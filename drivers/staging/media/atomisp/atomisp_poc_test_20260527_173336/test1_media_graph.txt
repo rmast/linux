@@ -1,0 +1,83 @@
+Media controller API version 7.0.0
+
+Media device information
+------------------------
+driver          atomisp-isp2
+model           Intel Atom ISP
+serial          
+bus info        PCI:0000:00:03.0
+hw revision     0x1010
+driver version  7.0.0
+
+Device topology
+- entity 1: ATOM ISP CSI2-port0 (2 pads, 2 links, 0 routes)
+            type V4L2 subdev subtype Unknown flags 0
+            device node name /dev/v4l-subdev0
+	pad0: SINK
+		[stream:0 fmt:SGRBG10_1X10/1296x976 field:none]
+		<- "mt9m114 ifp 3-0048":1 [ENABLED,IMMUTABLE]
+	pad1: SOURCE
+		[stream:0 fmt:SGRBG10_1X10/1296x976 field:none]
+		-> "Atom ISP":0 [ENABLED]
+
+- entity 4: ATOM ISP CSI2-port1 (2 pads, 1 link, 0 routes)
+            type V4L2 subdev subtype Unknown flags 0
+            device node name /dev/v4l-subdev1
+	pad0: SINK
+		[stream:0 fmt:SBGGR8_1X8/0x0]
+	pad1: SOURCE
+		[stream:0 fmt:SBGGR8_1X8/0x0]
+		-> "Atom ISP":0 []
+
+- entity 7: ATOM ISP CSI2-port2 (2 pads, 1 link, 0 routes)
+            type V4L2 subdev subtype Unknown flags 0
+            device node name /dev/v4l-subdev2
+	pad0: SINK
+		[stream:0 fmt:SBGGR8_1X8/0x0]
+	pad1: SOURCE
+		[stream:0 fmt:SBGGR8_1X8/0x0]
+		-> "Atom ISP":0 []
+
+- entity 10: Atom ISP (2 pads, 4 links, 0 routes)
+             type V4L2 subdev subtype Unknown flags 0
+             device node name /dev/v4l-subdev3
+	pad0: SINK
+		[stream:0 fmt:SGRBG10_1X10/1296x976 field:none
+		 crop:(0,0)/1280x960]
+		<- "ATOM ISP CSI2-port0":1 [ENABLED]
+		<- "ATOM ISP CSI2-port1":1 []
+		<- "ATOM ISP CSI2-port2":1 []
+	pad1: SOURCE
+		[stream:0 fmt:META_12/1280x960
+		 compose:(0,0)/1280x960]
+		-> "ATOMISP video output":0 [ENABLED,IMMUTABLE]
+
+- entity 13: mt9m114 ifp 3-0048 (2 pads, 2 links, 0 routes)
+             type V4L2 subdev subtype Unknown flags 0
+             device node name /dev/v4l-subdev5
+	pad0: SINK
+		[stream:0 fmt:SGRBG10_1X10/1296x976@1/30 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range
+		 crop.bounds:(0,0)/1296x976
+		 crop:(0,0)/1296x976
+		 compose.bounds:(0,0)/1296x976
+		 compose:(0,0)/1296x976]
+		<- "mt9m114 pixel array 3-0048":0 [ENABLED,IMMUTABLE]
+	pad1: SOURCE
+		[stream:0 fmt:SGRBG10_1X10/1296x976@1/30 field:none colorspace:raw ycbcr:601 quantization:full-range]
+		-> "ATOM ISP CSI2-port0":0 [ENABLED,IMMUTABLE]
+
+- entity 16: mt9m114 pixel array 3-0048 (1 pad, 1 link, 0 routes)
+             type V4L2 subdev subtype Sensor flags 0
+             device node name /dev/v4l-subdev4
+	pad0: SOURCE
+		[stream:0 fmt:SGRBG10_1X10/1296x976 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range
+		 crop.bounds:(0,0)/1296x976
+		 crop:(0,0)/1296x976]
+		-> "mt9m114 ifp 3-0048":0 [ENABLED,IMMUTABLE]
+
+- entity 28: ATOMISP video output (1 pad, 1 link)
+             type Node subtype V4L flags 0
+             device node name /dev/video0
+	pad0: SINK
+		<- "Atom ISP":1 [ENABLED,IMMUTABLE]
+

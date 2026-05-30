@@ -1,0 +1,11 @@
+Format Video Capture:
+	Width/Height      : 1280/720
+	Pixel Format      : 'YUYV' (YUYV 4:2:2)
+	Field             : None
+	Bytes per Line    : 2560
+	Size Image        : 1843200
+	Colorspace        : Rec. 709
+	Transfer Function : Rec. 709
+	YCbCr/HSV Encoding: Rec. 709
+	Quantization      : Default (maps to Limited Range)
+	Flags             : 

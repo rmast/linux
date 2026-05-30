@@ -51,6 +51,11 @@ Expected:
 - live preview stream is visible
 - no immediate crash or repeated pipeline restart loop
 
+Note:
+
+- On older PoC builds, qcam may pick RGB565 and show wrong colors (channel swap/tint).
+- Prefer the latest PoC build (v8 or newer), where AtomISP skips RGB565 advertisement for preview stability.
+
 ## Visual Test B: GStreamer libcamerasrc
 
 If `qcam` is unavailable, use gstreamer with libcamera source:
@@ -70,6 +75,15 @@ Expected:
 - live preview window opens
 - moving image updates continuously
 - process exits cleanly on Ctrl+C
+
+For color-stable preview, force NV12 explicitly:
+
+```bash
+gst-launch-1.0 libcamerasrc ! video/x-raw,format=NV12,width=1248,height=928,pixel-aspect-ratio=1/1 ! videoconvert ! autovideosink
+```
+
+If the image looks letterboxed/pillarboxed, this is often display scaling behavior in the sink.
+The AtomISP path may expose non-exact 4:3 sizes (for example 600x440 or 1248x928) due hardware margins/cropping.
 
 ## Optional Smoke Capture (already validated path)
 

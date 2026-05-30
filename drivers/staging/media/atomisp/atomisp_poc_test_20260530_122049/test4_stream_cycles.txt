@@ -1,0 +1,40 @@
+  Cycle 1:
+    Result: OK (gst-fallback)
+  Cycle 2:
+    Result: OK (gst-fallback)
+  Cycle 3:
+    Result: OK (gst-fallback)
+  Cycle 4:
+    Result: OK (gst-fallback)
+  Cycle 5:
+    Result: OK (gst-fallback)
+  Cycle 6:
+    Result: OK (gst-fallback)
+  Cycle 7:
+    Result: OK (gst-fallback)
+  Cycle 8:
+    Result: OK (gst-fallback)
+  Cycle 9:
+    Result: OK (gst-fallback)
+  Cycle 10:
+    Result: OK (gst-fallback)
+  Cycle 11:
+    Result: OK (gst-fallback)
+  Cycle 12:
+    Result: OK (gst-fallback)
+  Cycle 13:
+    Result: OK (gst-fallback)
+  Cycle 14:
+    Result: OK (gst-fallback)
+  Cycle 15:
+    Result: OK (gst-fallback)
+  Cycle 16:
+    Result: OK (gst-fallback)
+  Cycle 17:
+    Result: OK (gst-fallback)
+  Cycle 18:
+    Result: OK (gst-fallback)
+  Cycle 19:
+    Result: OK (gst-fallback)
+  Cycle 20:
+    Result: OK (gst-fallback)

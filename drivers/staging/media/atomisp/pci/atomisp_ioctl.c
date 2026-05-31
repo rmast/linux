@@ -667,6 +667,14 @@ static int atomisp_enum_fmt_cap(struct file *file, void *fh,
 		if (format->sh_fmt == IA_CSS_FRAME_FORMAT_RAW)
 			continue;
 
+		/*
+		 * Keep RGB565 hidden until channel-ordering is validated for this
+		 * capture path. Advertising a broken format is worse than not
+		 * exposing it.
+		 */
+		if (format->pixelformat == V4L2_PIX_FMT_RGB565)
+			continue;
+
 		if (f->mbus_code && format->mbus_code != f->mbus_code)
 			continue;
 

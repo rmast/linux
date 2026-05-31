@@ -531,16 +531,22 @@ static int atomisp_enum_framesizes(struct file *file, void *priv,
 	struct atomisp_device *isp = video_get_drvdata(vdev);
 	struct atomisp_sub_device *asd = atomisp_to_video_pipe(vdev)->asd;
 	struct atomisp_input_subdev *input = &isp->inputs[asd->input_curr];
+	const struct atomisp_format_bridge *format;
 	struct v4l2_subdev_frame_size_enum fse = {
 		.index = fsize->index,
 		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
-		.code = input->code,
 	};
 	struct v4l2_subdev_state *act_sd_state;
 	int ret;
 
 	if (!input->sensor)
 		return -EINVAL;
+
+	format = atomisp_get_format_bridge(fsize->pixel_format);
+	if (!format)
+		return -EINVAL;
+
+	fse.code = format->mbus_code;
 
 	if (input->crop_support)
 		return atomisp_enum_framesizes_crop(isp, fsize);
@@ -567,8 +573,8 @@ static int atomisp_enum_frameintervals(struct file *file, void *priv,
 	struct atomisp_device *isp = video_get_drvdata(vdev);
 	struct atomisp_sub_device *asd = atomisp_to_video_pipe(vdev)->asd;
 	struct atomisp_input_subdev *input = &isp->inputs[asd->input_curr];
+	const struct atomisp_format_bridge *format;
 	struct v4l2_subdev_frame_interval_enum fie = {
-		.code = atomisp_in_fmt_conv[0].code,
 		.index = fival->index,
 		.width = fival->width,
 		.height = fival->height,
@@ -579,6 +585,12 @@ static int atomisp_enum_frameintervals(struct file *file, void *priv,
 
 	if (!input->sensor)
 		return -EINVAL;
+
+	format = atomisp_get_format_bridge(fival->pixel_format);
+	if (!format)
+		return -EINVAL;
+
+	fie.code = format->mbus_code;
 
 	act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor);
 	ret = v4l2_subdev_call(input->sensor, pad, enum_frame_interval,

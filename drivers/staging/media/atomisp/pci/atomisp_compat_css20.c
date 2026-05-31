@@ -3273,11 +3273,14 @@ int atomisp_css_isr_thread(struct atomisp_device *isp)
 bool atomisp_css_valid_sof(struct atomisp_device *isp)
 {
 	unsigned int i;
+	bool has_stream = false;
 
 	/* Loop for each css vc stream */
 	for (i = 0; i < ATOMISP_INPUT_STREAM_NUM; i++) {
 		if (!isp->asd.stream_env[i].stream)
 			continue;
+
+		has_stream = true;
 
 		dev_dbg(isp->dev, "stream #%d: mode: %d\n",
 			i, isp->asd.stream_env[i].stream_config.mode);
@@ -3285,7 +3288,7 @@ bool atomisp_css_valid_sof(struct atomisp_device *isp)
 			return false;
 	}
 
-	return true;
+	return has_stream;
 }
 
 int atomisp_css_debug_dump_isp_binary(void)

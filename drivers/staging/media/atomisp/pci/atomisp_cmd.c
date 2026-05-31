@@ -3700,6 +3700,9 @@ static int atomisp_set_sensor_crop_and_fmt(struct atomisp_device *isp,
 		.which = which,
 		.format = *ffmt,
 	};
+	struct v4l2_mbus_framefmt try_saved_format;
+	struct v4l2_rect try_saved_crop;
+	bool restore_try_state = false;
 	struct v4l2_subdev_state *sd_state;
 	int ret = 0;
 
@@ -3721,6 +3724,19 @@ static int atomisp_set_sensor_crop_and_fmt(struct atomisp_device *isp,
 						       input->sensor->active_state;
 	if (sd_state)
 		v4l2_subdev_lock_state(sd_state);
+
+	if (which == V4L2_SUBDEV_FORMAT_TRY && sd_state) {
+		struct v4l2_mbus_framefmt *state_fmt;
+		struct v4l2_rect *state_crop;
+
+		state_fmt = v4l2_subdev_state_get_format(sd_state, 0);
+		state_crop = v4l2_subdev_state_get_crop(sd_state, 0);
+		if (state_fmt && state_crop) {
+			try_saved_format = *state_fmt;
+			try_saved_crop = *state_crop;
+			restore_try_state = true;
+		}
+	}
 
 	if (!input->crop_support)
 		goto set_fmt;
@@ -3753,6 +3769,20 @@ set_fmt:
 
 	if (sd_state)
 		v4l2_subdev_unlock_state(sd_state);
+
+	if (which == V4L2_SUBDEV_FORMAT_TRY && restore_try_state && sd_state) {
+		struct v4l2_mbus_framefmt *state_fmt;
+		struct v4l2_rect *state_crop;
+
+		v4l2_subdev_lock_state(sd_state);
+		state_fmt = v4l2_subdev_state_get_format(sd_state, 0);
+		state_crop = v4l2_subdev_state_get_crop(sd_state, 0);
+		if (state_fmt)
+			*state_fmt = try_saved_format;
+		if (state_crop)
+			*state_crop = try_saved_crop;
+		v4l2_subdev_unlock_state(sd_state);
+	}
 
 	/* Propagate new fmt to sensor ISP */
 	if (ret == 0 && which == V4L2_SUBDEV_FORMAT_ACTIVE && input->sensor_isp) {
@@ -3841,8 +3871,13 @@ int atomisp_try_fmt(struct atomisp_device *isp, struct v4l2_pix_format *f,
 		return -EINVAL;
 	}
 
-	f->width = ffmt.width - padding_w;
-	f->height = ffmt.height - padding_h;
+	/*
+	 * Recalculate padding for the sensor-selected size to keep TRY probing
+	 * deterministic across repeated calls with the same user request.
+	 */
+	atomisp_get_padding(isp, ffmt.width, ffmt.height, &padding_w, &padding_h);
+	f->width = ffmt.width > padding_w ? ffmt.width - padding_w : ffmt.width;
+	f->height = ffmt.height > padding_h ? ffmt.height - padding_h : ffmt.height;
 
 	/*
 	 * If the format is jpeg or custom RAW, then the width and height will

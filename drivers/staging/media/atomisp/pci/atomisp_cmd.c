@@ -4346,6 +4346,23 @@ static int atomisp_set_fmt_to_snr(struct video_device *vdev, const struct v4l2_p
 		asd->params.video_dis_en = false;
 	}
 
+	/*
+	 * The sensor may return a size that differs from what we asked for
+	 * (e.g. 656x496 when we requested 652x492).  The sink-pad crop is
+	 * later calculated as sensor_size - sink_pad_padding, so recompute
+	 * the padding here to reflect the actual sensor delta.  Without this,
+	 * the ISP sink crop overshoots the user-requested dimensions and
+	 * libcamera's pipeline will see a mismatched source size.
+	 */
+	if (atomisp_subdev_format_conversion(asd) &&
+	    ffmt.width >= f->width + dvs_env_w &&
+	    ffmt.height >= f->height + dvs_env_h) {
+		asd->sink_pad_padding_w = ffmt.width - f->width - dvs_env_w;
+		asd->sink_pad_padding_h = ffmt.height - f->height - dvs_env_h;
+		dev_dbg(isp->dev, "adjusted sink padding to %ux%u after sensor set_fmt\n",
+			asd->sink_pad_padding_w, asd->sink_pad_padding_h);
+	}
+
 	atomisp_subdev_set_ffmt(&asd->subdev, NULL,
 				V4L2_SUBDEV_FORMAT_ACTIVE,
 				ATOMISP_SUBDEV_PAD_SINK, &ffmt);

@@ -526,6 +526,38 @@ static int atomisp_enum_framesizes_crop(struct atomisp_device *isp,
 	return atomisp_enum_framesizes_crop_inner(isp, fsize, &active, &native, &valid_sizes);
 }
 
+static struct v4l2_subdev_state *atomisp_get_enum_mbus_source(struct atomisp_input_subdev *input,
+							      u32 *pad)
+{
+	if (input->sensor_isp) {
+		*pad = SENSOR_ISP_PAD_SOURCE;
+		return v4l2_subdev_lock_and_get_active_state(input->sensor_isp);
+	}
+
+	*pad = 0;
+	return v4l2_subdev_lock_and_get_active_state(input->sensor);
+}
+
+static u32 atomisp_get_enum_mbus_code(struct atomisp_input_subdev *input)
+{
+	struct v4l2_subdev_state *sd_state;
+	struct v4l2_mbus_framefmt *format;
+	u32 pad;
+	u32 code = 0;
+
+	sd_state = atomisp_get_enum_mbus_source(input, &pad);
+	if (!sd_state)
+		return 0;
+
+	format = v4l2_subdev_state_get_format(sd_state, pad);
+	if (format)
+		code = format->code;
+
+	v4l2_subdev_unlock_state(sd_state);
+
+	return code;
+}
+
 static int atomisp_enum_framesizes(struct file *file, void *priv,
 				   struct v4l2_frmsizeenum *fsize)
 {
@@ -553,9 +585,15 @@ static int atomisp_enum_framesizes(struct file *file, void *priv,
 	if (input->crop_support)
 		return atomisp_enum_framesizes_crop(isp, fsize);
 
-	act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor);
-	ret = v4l2_subdev_call(input->sensor, pad, enum_frame_size,
+	if (input->sensor_isp) {
+		act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor_isp);
+		ret = v4l2_subdev_call(input->sensor_isp, pad, enum_frame_size,
+				       act_sd_state, &fse);
+	} else {
+		act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor);
+		ret = v4l2_subdev_call(input->sensor, pad, enum_frame_size,
 			       act_sd_state, &fse);
+	}
 	if (act_sd_state)
 		v4l2_subdev_unlock_state(act_sd_state);
 	if (ret)
@@ -594,9 +632,15 @@ static int atomisp_enum_frameintervals(struct file *file, void *priv,
 
 	fie.code = format->mbus_code;
 
-	act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor);
-	ret = v4l2_subdev_call(input->sensor, pad, enum_frame_interval,
+	if (input->sensor_isp) {
+		act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor_isp);
+		ret = v4l2_subdev_call(input->sensor_isp, pad, enum_frame_interval,
+				       act_sd_state, &fie);
+	} else {
+		act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor);
+		ret = v4l2_subdev_call(input->sensor, pad, enum_frame_interval,
 			       act_sd_state, &fie);
+	}
 	if (act_sd_state)
 		v4l2_subdev_unlock_state(act_sd_state);
 	if (ret)
@@ -628,33 +672,43 @@ static int atomisp_enum_fmt_cap(struct file *file, void *fh,
 	if (!input->sensor)
 		return -EINVAL;
 
-	act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor);
-	for (code.index = 0;; code.index++) {
-		ret = v4l2_subdev_call(input->sensor, pad, enum_mbus_code,
-				       act_sd_state, &code);
-		if (ret)
-			break;
+	if (input->sensor_isp) {
+		sensor_mbus_code = atomisp_get_enum_mbus_code(input);
+		/*
+		 * The embedded ISP source pad defaults to RAW10, but the video
+		 * node should enumerate the capture formats exposed by the IFP,
+		 * not collapse to that internal source code.
+		 */
+		filter_by_mbus_code = !f->mbus_code;
+	} else {
+		act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor);
+		for (code.index = 0;; code.index++) {
+			ret = v4l2_subdev_call(input->sensor, pad, enum_mbus_code,
+					       act_sd_state, &code);
+			if (ret)
+				break;
 
-		if (code.index == 0)
-			sensor_mbus_code = code.code;
+			if (code.index == 0)
+				sensor_mbus_code = code.code;
 
-		if (f->mbus_code && code.code == f->mbus_code)
-			filter_by_mbus_code = true;
+			if (f->mbus_code && code.code == f->mbus_code)
+				filter_by_mbus_code = true;
+		}
+		if (act_sd_state)
+			v4l2_subdev_unlock_state(act_sd_state);
+
+		/*
+		 * Compatibility for old sensors which do not implement enum_mbus_code.
+		 * Keep the historical non-filtered behavior for these.
+		 */
+		if (ret && ret != -ENOIOCTLCMD)
+			return ret;
 	}
-	if (act_sd_state)
-		v4l2_subdev_unlock_state(act_sd_state);
 
-	/*
-	 * Compatibility for old sensors which do not implement enum_mbus_code.
-	 * Keep the historical non-filtered behavior for these.
-	 */
-	if (ret && ret != -ENOIOCTLCMD)
-		return ret;
-
-	if (!f->mbus_code && sensor_mbus_code)
+	if (!input->sensor_isp && !f->mbus_code && sensor_mbus_code)
 		f->mbus_code = sensor_mbus_code;
 
-	if (f->mbus_code && !filter_by_mbus_code)
+	if (!input->sensor_isp && f->mbus_code && !filter_by_mbus_code)
 		return -EINVAL;
 
 	for (i = 0; i < ARRAY_SIZE(atomisp_output_fmts); i++) {

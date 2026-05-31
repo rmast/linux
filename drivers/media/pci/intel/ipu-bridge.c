@@ -132,6 +132,14 @@ static const struct dmi_system_id upside_down_sensor_dmi_ids[] = {
 		},
 		.driver_data = "OVTI02C1",
 	},
+	{
+		/* HP x2 210 G1 (Cherry Trail) */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Hewlett-Packard"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "HP x2 210"),
+		},
+		.driver_data = "INT33F0",
+	},
 	{} /* Terminating entry */
 };
 

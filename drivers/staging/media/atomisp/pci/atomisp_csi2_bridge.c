@@ -370,7 +370,6 @@ static int atomisp_csi2_parse_sensor_fwnode(struct acpi_device *adev,
 	int ret, clock_num;
 	bool vcm = false;
 	int lanes = 1;
-	u32 rotation = 0;
 
 	id = acpi_match_acpi_device(atomisp_sensor_configs, adev);
 	if (id) {
@@ -417,13 +416,13 @@ static int atomisp_csi2_parse_sensor_fwnode(struct acpi_device *adev,
 	 * derives those from the legacy ACPI/DSM layout.
 	 */
 	ret = ipu_bridge_parse_ssdb(adev, sensor);
-	if (!ret)
-		rotation = sensor->rotation;
 
 	sensor->mclkspeed = PMC_CLK_RATE_19_2MHZ;
-	sensor->rotation = rotation;
-	sensor->orientation = (sensor->link == 1) ?
-		V4L2_FWNODE_ORIENTATION_BACK : V4L2_FWNODE_ORIENTATION_FRONT;
+	/*
+	 * Keep the generic bridge orientation as well: it already uses the
+	 * ACPI _PLD, which is more accurate than a port-number heuristic for
+	 * boards whose camera is rotated or wired unusually.
+	 */
 
 	if (vcm)
 		sensor->vcm_type = atomisp_csi2_get_vcm_type(adev);

@@ -370,6 +370,7 @@ static int atomisp_csi2_parse_sensor_fwnode(struct acpi_device *adev,
 	int ret, clock_num;
 	bool vcm = false;
 	int lanes = 1;
+	u32 rotation = 0;
 
 	id = acpi_match_acpi_device(atomisp_sensor_configs, adev);
 	if (id) {
@@ -410,8 +411,17 @@ static int atomisp_csi2_parse_sensor_fwnode(struct acpi_device *adev,
 	if (ret)
 		return ret;
 
+	/*
+	 * Reuse the generic IPU bridge SSDB parser for rotation. AtomISP
+	 * still keeps its own link and lane selection logic because it
+	 * derives those from the legacy ACPI/DSM layout.
+	 */
+	ret = ipu_bridge_parse_ssdb(adev, sensor);
+	if (!ret)
+		rotation = sensor->rotation;
+
 	sensor->mclkspeed = PMC_CLK_RATE_19_2MHZ;
-	sensor->rotation = 0;
+	sensor->rotation = rotation;
 	sensor->orientation = (sensor->link == 1) ?
 		V4L2_FWNODE_ORIENTATION_BACK : V4L2_FWNODE_ORIENTATION_FRONT;
 

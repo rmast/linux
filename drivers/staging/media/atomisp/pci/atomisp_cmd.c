@@ -3599,6 +3599,16 @@ void atomisp_get_padding(struct atomisp_device *isp, u32 width, u32 height,
 	}
 
 	/*
+	 * Bayer-order padding is only meaningful for RAW Bayer inputs.
+	 * Non-Bayer (YUV) sensors have bayer_order=0 which coincides with
+	 * IA_CSS_BAYER_ORDER_GRBG and would accidentally pass the checks
+	 * below without triggering extra padding, but rely on this implicitly.
+	 * Skip explicitly to make the non-Bayer path self-documenting.
+	 */
+	if (!atomisp_is_mbuscode_raw(sink->code))
+		goto apply_min_padding;
+
+	/*
 	 * The ISP only supports GRBG for other bayer-orders additional padding
 	 * is used so that the raw sensor data can be cropped to fix the order.
 	 */

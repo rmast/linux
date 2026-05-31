@@ -315,6 +315,8 @@ const struct atomisp_format_bridge atomisp_output_fmts[] = {
 	},
 };
 
+const size_t atomisp_output_fmts_size = ARRAY_SIZE(atomisp_output_fmts);
+
 const struct atomisp_format_bridge *
 atomisp_get_format_bridge(unsigned int pixelformat)
 {

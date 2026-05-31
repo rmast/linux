@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Support for Medifield PNW Camera Imaging ISP subsystem.
- *
+		for (i = 0; i < atomisp_output_fmts_size; i++) {
  * Copyright (c) 2010 Intel Corporation. All Rights Reserved.
  */
 #include <linux/module.h>
@@ -172,6 +172,29 @@ static int isp_subdev_enum_mbus_code(struct v4l2_subdev *sd,
 				     struct v4l2_subdev_state *sd_state,
 				     struct v4l2_subdev_mbus_code_enum *code)
 {
+	/*
+	 * SINK pad: enumerate sensor input codes (Bayer RAW, YUV422).
+	 * SOURCE pad: enumerate ISP capture output codes from
+	 * atomisp_output_fmts[], skipping RGB565 whose channel ordering
+	 * is unvalidated (consistent with atomisp_enum_fmt_cap()).
+	 */
+	if (code->pad == ATOMISP_SUBDEV_PAD_SOURCE) {
+		unsigned int idx = 0;
+		unsigned int i;
+
+		for (i = 0; i < atomisp_output_fmts_size; i++) {
+			if (atomisp_output_fmts[i].pixelformat == V4L2_PIX_FMT_RGB565)
+				continue;
+			if (idx == code->index) {
+				code->code = atomisp_output_fmts[i].mbus_code;
+				return 0;
+			}
+			idx++;
+		}
+		return -EINVAL;
+	}
+
+	/* SINK pad: all sensor input formats */
 	if (code->index >= ARRAY_SIZE(atomisp_in_fmt_conv) - 1)
 		return -EINVAL;
 

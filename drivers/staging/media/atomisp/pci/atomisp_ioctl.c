@@ -604,6 +604,8 @@ static int atomisp_enum_fmt_cap(struct file *file, void *fh,
 	struct v4l2_subdev_mbus_code_enum code = {
 		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
 	};
+	u32 sensor_mbus_code = 0;
+	bool filter_by_mbus_code = false;
 	const struct atomisp_format_bridge *format;
 	struct v4l2_subdev_state *act_sd_state;
 	unsigned int i, fi = 0;
@@ -613,12 +615,33 @@ static int atomisp_enum_fmt_cap(struct file *file, void *fh,
 		return -EINVAL;
 
 	act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor);
-	ret = v4l2_subdev_call(input->sensor, pad, enum_mbus_code,
-			       act_sd_state, &code);
+	for (code.index = 0;; code.index++) {
+		ret = v4l2_subdev_call(input->sensor, pad, enum_mbus_code,
+				       act_sd_state, &code);
+		if (ret)
+			break;
+
+		if (code.index == 0)
+			sensor_mbus_code = code.code;
+
+		if (f->mbus_code && code.code == f->mbus_code)
+			filter_by_mbus_code = true;
+	}
 	if (act_sd_state)
 		v4l2_subdev_unlock_state(act_sd_state);
-	if (ret)
+
+	/*
+	 * Compatibility for old sensors which do not implement enum_mbus_code.
+	 * Keep the historical non-filtered behavior for these.
+	 */
+	if (ret && ret != -ENOIOCTLCMD)
 		return ret;
+
+	if (!f->mbus_code && sensor_mbus_code)
+		f->mbus_code = sensor_mbus_code;
+
+	if (f->mbus_code && !filter_by_mbus_code)
+		return -EINVAL;
 
 	for (i = 0; i < ARRAY_SIZE(atomisp_output_fmts); i++) {
 		format = &atomisp_output_fmts[i];
@@ -632,6 +655,9 @@ static int atomisp_enum_fmt_cap(struct file *file, void *fh,
 		if (format->sh_fmt == IA_CSS_FRAME_FORMAT_RAW)
 			continue;
 
+		if (f->mbus_code && format->mbus_code != f->mbus_code)
+			continue;
+
 		/* Found a match. Now let's pick f->index'th one. */
 		if (fi < f->index) {
 			fi++;
@@ -641,6 +667,7 @@ static int atomisp_enum_fmt_cap(struct file *file, void *fh,
 		strscpy(f->description, format->description,
 			sizeof(f->description));
 		f->pixelformat = format->pixelformat;
+		f->mbus_code = format->mbus_code;
 		return 0;
 	}
 

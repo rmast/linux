@@ -240,6 +240,11 @@ int atomisp_css_video_configure_viewfinder(struct atomisp_sub_device *asd,
 	unsigned int min_width,
 	enum ia_css_frame_format format);
 
+int atomisp_css_preview_configure_viewfinder(struct atomisp_sub_device *asd,
+	unsigned int width, unsigned int height,
+	unsigned int min_width,
+	enum ia_css_frame_format format);
+
 int atomisp_css_capture_configure_viewfinder(
     struct atomisp_sub_device *asd,
     unsigned int width, unsigned int height,

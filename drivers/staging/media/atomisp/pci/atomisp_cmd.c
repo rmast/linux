@@ -3573,8 +3573,8 @@ void atomisp_get_padding(struct atomisp_device *isp, u32 width, u32 height,
 		return;
 	}
 
-	width = min(width, input->active_rect.width);
-	height = min(height, input->active_rect.height);
+	width = min(width, input->native_rect.width);
+	height = min(height, input->native_rect.height);
 
 	if (input->binning_support && width <= (input->active_rect.width / 2) &&
 				      height <= (input->active_rect.height / 2)) {
@@ -3588,6 +3588,15 @@ void atomisp_get_padding(struct atomisp_device *isp, u32 width, u32 height,
 	/* The below minimum padding requirements are for BYT / ISP2400 only */
 	if (IS_ISP2401)
 		return;
+
+	/* Embedded ISP capture already carries its own border, so do not
+	 * force the larger raw-sensor padding floor on the YUV path.
+	 * For ISP2400, the preview binary has top_cropping=12 baked in, so
+	 * effective_res + 12 must fit within the sensor input_res; keep the
+	 * ISP2400_MIN_PAD floor (12) even for sensor_isp to ensure this.
+	 */
+	if (input->sensor_isp && IS_ISP2401)
+		min_pad_w = min_pad_h = 8;
 
 	sink = atomisp_subdev_get_ffmt(&isp->asd.subdev, NULL, V4L2_SUBDEV_FORMAT_ACTIVE,
 				       ATOMISP_SUBDEV_PAD_SINK);
@@ -3970,32 +3979,38 @@ static inline int atomisp_set_sensor_mipi_to_isp(
 		    asd->stream_env[stream_id].isys_info[1].height);
 	}
 
-	/* Compatibility for sensors which provide no media bus code
-	 * in s_mbus_framefmt() nor support pad formats. */
-	if (mipi_info && mipi_info->input_format != -1) {
-		bayer_order = mipi_info->raw_bayer_order;
-
-		/* Input stream config is still needs configured */
-		/* TODO: Check if this is necessary */
-		fc = atomisp_find_in_fmt_conv_by_atomisp_in_fmt(
-			 mipi_info->input_format);
-		if (!fc)
-			return -EINVAL;
-		input_format = fc->atomisp_in_fmt;
-		metadata_format = mipi_info->metadata_format;
-		metadata_width = mipi_info->metadata_width;
-		metadata_height = mipi_info->metadata_height;
-	} else {
+	/*
+	 * Prefer the active sink pad format, as it reflects the actual media
+	 * graph configuration selected at runtime. Fall back to mipi_info for
+	 * legacy sensors that don't expose a usable mbus code.
+	 */
+	{
 		struct v4l2_mbus_framefmt *sink;
 
 		sink = atomisp_subdev_get_ffmt(&asd->subdev, NULL,
 					       V4L2_SUBDEV_FORMAT_ACTIVE,
 					       ATOMISP_SUBDEV_PAD_SINK);
 		fc = atomisp_find_in_fmt_conv(sink->code);
+	}
+
+	if (fc) {
+		input_format = fc->atomisp_in_fmt;
+		bayer_order = fc->bayer_order;
+	} else if (mipi_info && mipi_info->input_format != -1) {
+		bayer_order = mipi_info->raw_bayer_order;
+		fc = atomisp_find_in_fmt_conv_by_atomisp_in_fmt(
+			 mipi_info->input_format);
 		if (!fc)
 			return -EINVAL;
 		input_format = fc->atomisp_in_fmt;
-		bayer_order = fc->bayer_order;
+	} else {
+		return -EINVAL;
+	}
+
+	if (mipi_info) {
+		metadata_format = mipi_info->metadata_format;
+		metadata_width = mipi_info->metadata_width;
+		metadata_height = mipi_info->metadata_height;
 	}
 
 	atomisp_css_input_set_format(asd, stream_id, input_format);
@@ -4151,6 +4166,9 @@ static int atomisp_set_fmt_to_isp(struct video_device *vdev,
 		    asd->vfpp->val == ATOMISP_VFPP_DISABLE_SCALER) {
 			atomisp_css_video_configure_viewfinder(asd, width, height, 0,
 							       IA_CSS_FRAME_FORMAT_NV12);
+		} else if (asd->run_mode->val == ATOMISP_RUN_MODE_PREVIEW) {
+			atomisp_css_preview_configure_viewfinder(asd, width, height, 0,
+							 IA_CSS_FRAME_FORMAT_NV12);
 		} else if (asd->run_mode->val == ATOMISP_RUN_MODE_STILL_CAPTURE ||
 			   asd->vfpp->val == ATOMISP_VFPP_DISABLE_LOWLAT) {
 			atomisp_css_capture_configure_viewfinder(asd, width, height, 0,
@@ -4268,10 +4286,25 @@ static void atomisp_check_copy_mode(struct atomisp_sub_device *asd,
 				    const struct v4l2_pix_format *f)
 {
 	struct v4l2_mbus_framefmt *sink, *src;
+	const struct atomisp_format_bridge *format;
 
 	if (!IS_ISP2401) {
 		/* Only used for the new input system */
 		asd->copy_mode = false;
+		return;
+	}
+
+	/*
+	 * Restrict copy mode to RAW passthrough. For processed outputs
+	 * (for example YUV preview), forcing copy mode can select the copy
+	 * binary and fail stream start.
+	 */
+	format = atomisp_get_format_bridge(f->pixelformat);
+	if (!format || format->sh_fmt != IA_CSS_FRAME_FORMAT_RAW) {
+		asd->copy_mode = false;
+		dev_dbg(asd->isp->dev,
+			"copy_mode: 0 (non-RAW output format %8.8x)\n",
+			f->pixelformat);
 		return;
 	}
 
@@ -4369,6 +4402,21 @@ static int atomisp_set_fmt_to_snr(struct video_device *vdev, const struct v4l2_p
 	    ffmt.height >= f->height + dvs_env_h) {
 		asd->sink_pad_padding_w = ffmt.width - f->width - dvs_env_w;
 		asd->sink_pad_padding_h = ffmt.height - f->height - dvs_env_h;
+		/*
+		 * ISP2400 CSS preview binaries have DIS (digital image
+		 * stabilisation) enabled, which forces a minimum DVS envelope
+		 * of SH_CSS_MIN_DVS_ENVELOPE (12) pixels.  The IFMTR check
+		 * requires binary->in_frame_info (= effective_res + 12) to fit
+		 * within the sensor input_res.  Clamp the padding to at least
+		 * ISP2400_MIN_PAD_W/H so that effective_res is small enough
+		 * for the binary's in_frame_info to stay within sensor bounds.
+		 */
+		if (!IS_ISP2401) {
+			asd->sink_pad_padding_w = max_t(u32, asd->sink_pad_padding_w,
+							ISP2400_MIN_PAD_W);
+			asd->sink_pad_padding_h = max_t(u32, asd->sink_pad_padding_h,
+							ISP2400_MIN_PAD_H);
+		}
 		dev_dbg(isp->dev, "adjusted sink padding to %ux%u after sensor set_fmt\n",
 			asd->sink_pad_padding_w, asd->sink_pad_padding_h);
 	}

@@ -119,8 +119,10 @@ RGB[0,8191],coef[-8192,8191] -> RGB[0,8191]
 #define SH_CSS_MAX_BQ_GRID_HEIGHT         60
 
 /* The minimum dvs envelope is 12x12(for IPU2) to make sure the
- * invalid rows/columns that result from filter initialization are skipped. */
-#define SH_CSS_MIN_DVS_ENVELOPE           12U
+ * invalid rows/columns that result from filter initialization are skipped.
+ * Reduced to 0 for mt9m114 PoC: sensor only provides 8px extra padding,
+ * so the original 12px minimum causes ifmtr_input_start_line to fail. */
+#define SH_CSS_MIN_DVS_ENVELOPE           0U
 
 /* The FPGA system (vec_nelems == 16) only supports up to 5MP */
 #define SH_CSS_MAX_SENSOR_WIDTH           4608

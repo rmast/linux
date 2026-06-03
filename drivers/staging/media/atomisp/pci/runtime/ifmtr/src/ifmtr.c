@@ -483,8 +483,12 @@ static int ifmtr_start_column(
 	unsigned int in = config->input_config.input_res.width, start,
 		     for_bayer = ia_css_ifmtr_columns_needed_for_bayer_order(config);
 
-	if (bin_in + 2 * for_bayer > in)
-		return -EINVAL;
+	if (bin_in + 2 * for_bayer > in) {
+		/* Sensor provides less padding than firmware needs (left_cropping
+		 * exceeds available border). Clamp to column 0 for PoC. */
+		*start_column = for_bayer;
+		return 0;
+	}
 
 	/* On the hardware, we want to use the middle of the input, so we
 	 * divide the start column by 2. */
@@ -509,8 +513,12 @@ static int ifmtr_input_start_line(
 	unsigned int in = config->input_config.input_res.height, start,
 		     for_bayer = ia_css_ifmtr_lines_needed_for_bayer_order(config);
 
-	if (bin_in + 2 * for_bayer > in)
-		return -EINVAL;
+	if (bin_in + 2 * for_bayer > in) {
+		/* Sensor provides less padding than firmware top_cropping needs.
+		 * Clamp to line 0 so the stream can start (PoC workaround). */
+		*start_line = for_bayer;
+		return 0;
+	}
 
 	/* On the hardware, we want to use the middle of the input, so we
 	 * divide the start line by 2. On the simulator, we cannot handle extra

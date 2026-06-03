@@ -573,6 +573,12 @@ static void __apply_additional_pipe_config(
 		}
 		break;
 	case IA_CSS_PIPE_ID_PREVIEW:
+		/*
+		 * Keep preview on a minimal path for mt9m114/AtomISP stability.
+		 * Enabling digital zoom here has repeatedly led to stream start
+		 * failures with no frames delivered.
+		 */
+		stream_env->pipe_configs[pipe_id].enable_dz = false;
 		break;
 	case IA_CSS_PIPE_ID_YUVPP:
 	case IA_CSS_PIPE_ID_COPY:
@@ -2354,6 +2360,17 @@ int atomisp_css_video_configure_viewfinder(
 {
 	__configure_vf_output(asd, width, height, min_width, format,
 			      IA_CSS_PIPE_ID_VIDEO);
+	return 0;
+}
+
+int atomisp_css_preview_configure_viewfinder(
+	struct atomisp_sub_device *asd,
+	unsigned int width, unsigned int height,
+	unsigned int min_width,
+	enum ia_css_frame_format format)
+{
+	__configure_vf_output(asd, width, height, min_width, format,
+			      IA_CSS_PIPE_ID_PREVIEW);
 	return 0;
 }
 

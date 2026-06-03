@@ -542,6 +542,8 @@ void atomisp_subdev_set_ffmt(struct v4l2_subdev *sd,
 		break;
 	}
 	case ATOMISP_SUBDEV_PAD_SOURCE:
+		if (ffmt->code == MEDIA_BUS_FMT_META_16)
+			ffmt->code = MEDIA_BUS_FMT_UYVY8_1X16;
 		__ffmt->code = ffmt->code;
 		break;
 	}

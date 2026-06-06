@@ -6,41 +6,32 @@ Release:        1%{?dist}
 Summary:        Hybrid atomisp camera modules (atomisp, ipu-bridge, mt9m114)
 License:        GPL-2.0-only
 URL:            https://example.invalid/%{kmod_name}
-Source0:        %{kmod_name}-%{version}.tar.gz
+Source0:        %{kmod_name}-kmod-%{version}-%{release}.src.rpm
 
 BuildArch:      noarch
-BuildRequires:  akmods
-BuildRequires:  gcc
-BuildRequires:  kmodtool
-BuildRequires:  make
-BuildRequires:  tar
 Requires:       akmods
-Requires:       gcc
-Requires:       make
+Requires:       kmodtool
 
 %description
-akmod package for out-of-tree camera modules based on a patched atomisp tree.
-The source tarball is shared with DKMS and is expected to contain:
-- top-level Makefile
-- dkms.conf
-- drivers/staging/media/atomisp subtree
-- external/ipu-bridge and external/mt9m114 wrappers
+akmod package that installs a kmod source RPM payload into /usr/src/akmods.
+akmods scans /usr/src/akmods/*-kmod.latest and rebuilds the linked source RPM
+for the running kernel.
 
 %prep
-%setup -q -n %{kmod_name}-%{version}
+:
 
 %build
-# akmods builds modules at install/boot time for target kernels.
+:
 
 %install
-mkdir -p %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}
-cp -a . %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-%{version}
+mkdir -p %{buildroot}%{_usrsrc}/akmods
+install -m 0644 %{SOURCE0} %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-kmod-%{version}-%{release}.src.rpm
+ln -s %{kmod_name}-kmod-%{version}-%{release}.src.rpm %{buildroot}%{_usrsrc}/akmods/%{kmod_name}-kmod.latest
 
 %files
-%license COPYING
-%doc VERSION BASE_COMMIT COMMITS.txt
-%{_usrsrc}/akmods/%{kmod_name}-%{version}
+%{_usrsrc}/akmods/%{kmod_name}-kmod-%{version}-%{release}.src.rpm
+%{_usrsrc}/akmods/%{kmod_name}-kmod.latest
 
 %changelog
 * Sat Jun 06 2026 Maintainer <maintainer@example.invalid> - 0-1
-- Initial hybrid akmod scaffold for atomisp patchset
+- Install kmod SRPM payload and -kmod.latest symlink for akmods

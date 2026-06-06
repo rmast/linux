@@ -100,6 +100,15 @@ modinfo atomisp | head
 lsmod | grep -E 'atomisp|ipu_bridge|mt9m114'
 ```
 
+Controleer ook dat vervangende modules echt uit `updates/` komen en niet uit de distro-kernel:
+
+```bash
+modinfo mt9m114 | head
+modinfo ipu_bridge | head
+```
+
+Als je daar nog paden ziet onder `/kernel/drivers/...`, dan is de override nog niet actief.
+
 Als `modprobe` faalt, check eerst de akmods-buildlog:
 
 ```bash
@@ -116,6 +125,7 @@ Let op:
 - Installeer `kernel-devel` en `kernel-headers` voor de kernel waarop je wilt laden.
 - `akmods` moet `akmodsbuild` kunnen uitvoeren (`command -v akmodsbuild`).
 - Op sommige systemen heet het pakket `akmods-build`, op andere zit `akmodsbuild` al in `akmods`.
+- De kmod package installeert de modules onder `/lib/modules/<kernel>/updates/atomisp-hybrid/` zodat `mt9m114` en `ipu-bridge` voorrang krijgen op de in-tree Fedora modules.
 - Als Fedora kernelconfig `CONFIG_VIDEO_ATOMISP` niet op `m` staat, forceert deze build dat alleen binnen de externe module-build.
 - Dit verandert niets aan je wifi-stack; je kunt dus distro-kernel + losse camera-modules combineren.
 

@@ -97,6 +97,13 @@ sed -i \
   -e 's|^ccflags-y += \$(INCLUDES) \$(DEFINES)|ccflags-y += -I$(M)/pci -I$(M)/include/linux $(INCLUDES) $(DEFINES)|' \
   "$ATOMISP_MK"
 
+# Remove stale in-tree build artifacts so akmods rebuilds from clean sources.
+# Old .cmd files can embed absolute paths from the original build host.
+find "$PKG_DIR" -type f \
+  \( -name '*.o' -o -name '*.ko' -o -name '*.mod' -o -name '*.mod.c' -o -name '.*.cmd' -o -name 'modules.order' -o -name 'Module.symvers' \) \
+  -delete
+find "$PKG_DIR" -type f -name '*.a' -delete
+
 echo "[3/6] Generate metadata"
 cat > "$PKG_DIR/VERSION" <<EOF
 $VERSION

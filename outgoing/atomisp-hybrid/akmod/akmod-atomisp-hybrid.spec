@@ -11,6 +11,7 @@ Source0:        %{kmod_name}-kmod-%{version}-%{release}.src.rpm
 BuildArch:      noarch
 Requires:       akmods
 Requires:       kmodtool
+Recommends:     atomisp-firmware
 
 %description
 akmod package that installs a kmod source RPM payload into /usr/src/akmods.

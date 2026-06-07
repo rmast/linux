@@ -1,4 +1,5 @@
 %global kmod_name atomisp-hybrid
+%global src_version %{?src_version}%{!?src_version:0}
 %global kernels %{?kernels:%{kernels}}%{!?kernels:%(uname -r)}
 %global debug_package %{nil}
 %global _debugsource_packages 0
@@ -7,7 +8,7 @@
 %global _source_date_epoch_from_changelog 0
 
 Name:           %{kmod_name}-kmod
-Version:        0
+Version:        %{src_version}
 Release:        1%{?dist}
 Summary:        Out-of-tree camera kmods (atomisp, ipu-bridge, mt9m114)
 License:        GPL-2.0-only

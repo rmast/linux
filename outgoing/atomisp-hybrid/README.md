@@ -66,22 +66,26 @@ Praktisch stappenpad (Fedora):
 rpmdev-setuptree
 cp outgoing/atomisp-hybrid/akmod/atomisp-hybrid-kmod.spec ~/rpmbuild/SPECS/
 cp outgoing/atomisp-hybrid/akmod/akmod-atomisp-hybrid.spec ~/rpmbuild/SPECS/
-cp outgoing/atomisp-hybrid/dist/atomisp-hybrid-0.tar.gz ~/rpmbuild/SOURCES/
+
+# Gebruik de versie uit de gegenereerde dist-tarballnaam.
+ver="$(basename outgoing/atomisp-hybrid/dist/atomisp-hybrid-*.tar.gz .tar.gz | sed 's/^atomisp-hybrid-//')"
+cp "outgoing/atomisp-hybrid/dist/atomisp-hybrid-${ver}.tar.gz" ~/rpmbuild/SOURCES/
 
 # 1) Maak eerst de kmod source RPM
-rpmbuild -bs ~/rpmbuild/SPECS/atomisp-hybrid-kmod.spec
+rpmbuild -bs --define "src_version ${ver}" ~/rpmbuild/SPECS/atomisp-hybrid-kmod.spec
 
 # 2) Gebruik die SRPM als input voor de akmod wrapper
-cp ~/rpmbuild/SRPMS/atomisp-hybrid-kmod-0-1.fc44.src.rpm ~/rpmbuild/SOURCES/
+cp ~/rpmbuild/SRPMS/atomisp-hybrid-kmod-${ver}-1.fc44.src.rpm ~/rpmbuild/SOURCES/
 
 # 3) Bouw en installeer de akmod noarch package
-rpmbuild -ba ~/rpmbuild/SPECS/akmod-atomisp-hybrid.spec
-sudo dnf install ~/rpmbuild/RPMS/noarch/akmod-atomisp-hybrid-0-1.fc44.noarch.rpm
+rpmbuild -ba --define "src_version ${ver}" ~/rpmbuild/SPECS/akmod-atomisp-hybrid.spec
+sudo dnf install ~/rpmbuild/RPMS/noarch/akmod-atomisp-hybrid-${ver}-1.fc44.noarch.rpm
 ```
 
 Belangrijk:
 - installeer **niet** handmatig de `.src.rpm`; die wordt door de akmod package onder `/usr/src/akmods` geplaatst
 - `akmods` gebruikt specifiek `/usr/src/akmods/atomisp-hybrid-kmod.latest` en rebuild daarna de gelinkte `atomisp-hybrid-kmod-*.src.rpm`
+- meerdere oude `atomisp-hybrid-*.tar.gz` bestanden in `~/rpmbuild/SOURCES/` zijn niet erg; alleen de naam die exact matcht met `Source0` van de spec wordt gebruikt
 
 Build voor actieve kernel forceren en laden:
 
@@ -160,7 +164,25 @@ De tool zoekt specifiek:
 Voorbeeld voor deze module:
 
 - `/usr/src/akmods/atomisp-hybrid-kmod.latest`
-- `/usr/src/akmods/atomisp-hybrid-kmod-0-1.fc44.src.rpm`
+- `/usr/src/akmods/atomisp-hybrid-kmod-<version>-1.fc44.src.rpm`
+
+## 7. Diagnose als akmods elke boot opnieuw bouwt
+
+Als je nog steeds ~7 minuten rebuild ziet bij reboot, controleer dan direct deze drie punten:
+
+```bash
+uname -r
+sudo ls -ld /lib/modules/"$(uname -r)"/extra/atomisp-hybrid
+rpm -qf /lib/modules/"$(uname -r)"/extra/atomisp-hybrid
+sudo tail -n 120 /var/cache/akmods/atomisp-hybrid/*.log
+sudo journalctl -b -u akmods --no-pager
+```
+
+Interpretatie:
+
+- ontbreekt `/lib/modules/<kver>/extra/atomisp-hybrid`, dan denkt akmods dat er niets geïnstalleerd is
+- als de map bestaat maar de log zegt "could not be installed", dan faalt de binaire kmod-installatie en bouwt hij elke boot opnieuw
+- als de map bestaat en package-eigendom klopt, hoort akmods niet opnieuw te bouwen tenzij `src_version` omhoog is gegaan
 
 Snelle diagnose:
 

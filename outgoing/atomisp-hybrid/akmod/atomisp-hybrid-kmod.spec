@@ -51,12 +51,17 @@ done
 
 %install
 rm -rf %{buildroot}
+install -d %{buildroot}/usr/lib/depmod.d
+cat > %{buildroot}/usr/lib/depmod.d/atomisp-hybrid.conf <<'EOF'
+override mt9m114 * extra/atomisp-hybrid
+override ipu_bridge * extra/atomisp-hybrid
+EOF
 for kver in %{kernels}; do
-  install -d %{buildroot}/lib/modules/${kver}/updates/%{kmod_name}
-  install -m 0644 drivers/staging/media/atomisp/atomisp.ko %{buildroot}/lib/modules/${kver}/updates/%{kmod_name}/
-  install -m 0644 drivers/staging/media/atomisp/pci/atomisp_gmin_platform.ko %{buildroot}/lib/modules/${kver}/updates/%{kmod_name}/
-  install -m 0644 external/ipu-bridge/ipu-bridge.ko %{buildroot}/lib/modules/${kver}/updates/%{kmod_name}/
-  install -m 0644 external/mt9m114/mt9m114.ko %{buildroot}/lib/modules/${kver}/updates/%{kmod_name}/
+  install -d %{buildroot}/lib/modules/${kver}/extra/%{kmod_name}
+  install -m 0644 drivers/staging/media/atomisp/atomisp.ko %{buildroot}/lib/modules/${kver}/extra/%{kmod_name}/
+  install -m 0644 drivers/staging/media/atomisp/pci/atomisp_gmin_platform.ko %{buildroot}/lib/modules/${kver}/extra/%{kmod_name}/
+  install -m 0644 external/ipu-bridge/ipu-bridge.ko %{buildroot}/lib/modules/${kver}/extra/%{kmod_name}/
+  install -m 0644 external/mt9m114/mt9m114.ko %{buildroot}/lib/modules/${kver}/extra/%{kmod_name}/
 done
 
 %post
@@ -70,7 +75,8 @@ for kver in %{kernels}; do
 done
 
 %files
-/lib/modules/*/updates/%{kmod_name}/*.ko*
+/usr/lib/depmod.d/atomisp-hybrid.conf
+/lib/modules/*/extra/%{kmod_name}/*.ko*
 
 %changelog
 * Sat Jun 06 2026 R. Mast <rmast@example.invalid> - 0-1

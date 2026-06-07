@@ -108,6 +108,11 @@ modinfo ipu_bridge | head
 ```
 
 Als je daar nog paden ziet onder `/kernel/drivers/...`, dan is de override nog niet actief.
+De package installeert de modules onder `extra/atomisp-hybrid/` en gebruikt daarnaast
+een `depmod.d` override voor `mt9m114` en `ipu_bridge`, zodat:
+
+- `akmods` de kmods als "al gebouwd" herkent
+- jouw vervangende modules toch voorrang krijgen op de Fedora in-tree modules
 
 Als `modprobe` faalt, check eerst de akmods-buildlog:
 
@@ -125,11 +130,26 @@ Let op:
 - Installeer `kernel-devel` en `kernel-headers` voor de kernel waarop je wilt laden.
 - `akmods` moet `akmodsbuild` kunnen uitvoeren (`command -v akmodsbuild`).
 - Op sommige systemen heet het pakket `akmods-build`, op andere zit `akmodsbuild` al in `akmods`.
-- De kmod package installeert de modules onder `/lib/modules/<kernel>/updates/atomisp-hybrid/` zodat `mt9m114` en `ipu-bridge` voorrang krijgen op de in-tree Fedora modules.
+- De kmod package installeert de modules onder `/lib/modules/<kernel>/extra/atomisp-hybrid/`.
+- Een bestand onder `/usr/lib/depmod.d/atomisp-hybrid.conf` geeft `mt9m114` en `ipu_bridge` expliciet voorrang uit `extra/atomisp-hybrid`.
 - Als Fedora kernelconfig `CONFIG_VIDEO_ATOMISP` niet op `m` staat, forceert deze build dat alleen binnen de externe module-build.
 - Dit verandert niets aan je wifi-stack; je kunt dus distro-kernel + losse camera-modules combineren.
 
-## 5. Waarom "No akmod packages found"
+## 5. Waarom akmods anders elke boot opnieuw bouwt
+
+`akmods` beschouwt een kmod pas als aanwezig wanneer er een directory bestaat onder:
+
+- `/lib/modules/<kernel>/extra/<naam>/`
+
+De tool controleert hier expliciet op. Als je package alleen onder `updates/<naam>/`
+installeert, dan denkt `akmods` bij elke boot dat de kmod nog ontbreekt en rebuildt hij opnieuw.
+
+Daarom gebruikt deze package nu:
+
+- install onder `extra/atomisp-hybrid/`
+- plus `depmod.d` overrides voor modules die de in-tree variant moeten vervangen
+
+## 6. Waarom "No akmod packages found"
 
 `akmods` scant **niet** op willekeurige bronmappen onder `/usr/src/akmods`.
 De tool zoekt specifiek:

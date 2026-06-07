@@ -30,8 +30,17 @@ for blob in "${BLOBS[@]}"; do
     echo "[skip] $blob  (al aanwezig in $DEST)"
     continue
   fi
-  echo "[download] $blob"
-  curl -fL --retry 3 "$BASEURL/$blob" -o "$dest_file"
+  # Check if an already-unpacked .bin.xz exists locally (e.g. from linux-firmware)
+  local_xz="/lib/firmware/intel/ipu/${blob}.xz"
+  if [[ -f "$local_xz" ]]; then
+    echo "[unpack] $local_xz -> $dest_file"
+    xz -dk --stdout "$local_xz" > "$dest_file"
+    echo "[ok] $blob (uit lokale .xz)"
+    continue
+  fi
+  # Otherwise download the .xz and unpack
+  echo "[download+unpack] $blob"
+  curl -fL --retry 3 "$BASEURL/${blob}.xz" | xz -d > "$dest_file"
   echo "[ok] $blob -> $dest_file"
 done
 

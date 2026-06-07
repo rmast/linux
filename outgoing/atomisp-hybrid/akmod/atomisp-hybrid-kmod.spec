@@ -58,6 +58,7 @@ override atomisp * extra/atomisp-hybrid
 override atomisp_gmin_platform * extra/atomisp-hybrid
 override mt9m114 * extra/atomisp-hybrid
 override ipu_bridge * extra/atomisp-hybrid
+override ipu-bridge * extra/atomisp-hybrid
 EOF
 for kver in %{kernels}; do
   install -d %{buildroot}/lib/modules/${kver}/extra/%{kmod_name}

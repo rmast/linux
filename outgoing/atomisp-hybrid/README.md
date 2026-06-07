@@ -123,6 +123,9 @@ De package installeert de modules onder `extra/atomisp-hybrid/` en gebruikt daar
 - `akmods` de kmods als "al gebouwd" herkent
 - jouw vervangende modules toch voorrang krijgen op de Fedora in-tree modules
 
+Voor `ipu_bridge` staat in de package zowel `ipu_bridge` als `ipu-bridge` als override,
+zodat naamnormalisatie tussen module-naam en bestandsnaam geen verkeerde resolver-keuze geeft.
+
 Waarom niet in `updates/`:
 - `updates/` heeft inderdaad van nature voorrang in module lookup
 - maar `akmods` controleert expliciet op package-state rond `extra/<naam>`

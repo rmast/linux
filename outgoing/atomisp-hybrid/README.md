@@ -13,6 +13,11 @@ De oplossing bouwt deze modules:
 - `ipu-bridge`
 - `mt9m114`
 
+Versie-opmaak:
+- de export gebruikt `YYYYMMDDgitz<commit_epoch>.<short_hash>`
+- de `z` na `git` zorgt dat nieuwe builds hoger sorteren dan oudere `git<hex>` varianten
+- de numerieke `commit_epoch` zorgt daarna voor monotone volgorde tussen opeenvolgende builds
+
 ## 1. Sourceboom + tarball genereren
 
 Voer uit vanuit de kernelboom:

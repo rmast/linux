@@ -54,7 +54,9 @@ fi
 
 HEAD_SHORT="$(git rev-parse --short HEAD)"
 STAMP="$(date +%Y%m%d)"
-VERSION="${STAMP}git${HEAD_SHORT}"
+HEAD_EPOCH="$(git show -s --format=%ct HEAD)"
+# Use 'gitz' to sort newer than older 'git<hex>' builds, then compare numerically.
+VERSION="${STAMP}gitz${HEAD_EPOCH}.${HEAD_SHORT}"
 PKG_DIR_NAME="${PKG_NAME}-${VERSION}"
 PKG_DIR="${OUT_DIR}/${PKG_DIR_NAME}"
 

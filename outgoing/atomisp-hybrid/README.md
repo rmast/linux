@@ -77,6 +77,9 @@ rpmbuild -bs --define "src_version ${ver}" ~/rpmbuild/SPECS/atomisp-hybrid-kmod.
 # 2) Gebruik die SRPM als input voor de akmod wrapper
 cp ~/rpmbuild/SRPMS/atomisp-hybrid-kmod-${ver}-1.fc44.src.rpm ~/rpmbuild/SOURCES/
 
+# Controleer desnoods expliciet dat de ingebedde spec ook echt deze versie draagt.
+rpm -qp --qf '%{NAME} %{VERSION}-%{RELEASE}\n' ~/rpmbuild/SRPMS/atomisp-hybrid-kmod-${ver}-1.fc44.src.rpm
+
 # 3) Bouw en installeer de akmod noarch package
 rpmbuild -ba --define "src_version ${ver}" ~/rpmbuild/SPECS/akmod-atomisp-hybrid.spec
 sudo dnf install ~/rpmbuild/RPMS/noarch/akmod-atomisp-hybrid-${ver}-1.fc44.noarch.rpm
@@ -86,6 +89,8 @@ Belangrijk:
 - installeer **niet** handmatig de `.src.rpm`; die wordt door de akmod package onder `/usr/src/akmods` geplaatst
 - `akmods` gebruikt specifiek `/usr/src/akmods/atomisp-hybrid-kmod.latest` en rebuild daarna de gelinkte `atomisp-hybrid-kmod-*.src.rpm`
 - meerdere oude `atomisp-hybrid-*.tar.gz` bestanden in `~/rpmbuild/SOURCES/` zijn niet erg; alleen de naam die exact matcht met `Source0` van de spec wordt gebruikt
+- de **wrapper** `akmod-atomisp-hybrid.spec` versioneren is niet genoeg; ook de onderliggende `atomisp-hybrid-kmod-*.src.rpm` moet correct zijn
+- als de kmod-spec `src_version` naar `0` laat vallen zonder `--define src_version`, dan zoekt `akmodsbuild` tijdens `%prep` naar `atomisp-hybrid-0.tar.gz`
 
 Build voor actieve kernel forceren en laden:
 
@@ -128,6 +133,20 @@ sudo tail -n 120 /var/cache/akmods/atomisp-hybrid/*.log
 Let op:
 - de spec is bewust minimaal gehouden als startpunt
 - afhankelijk van je lokale akmods macroset kun je `%kernel_module_package`-details verder aanscherpen
+
+### Specifiek voor `%prep` fout op `atomisp-hybrid-0.tar.gz`
+
+Als je deze fout ziet terwijl `/usr/src/akmods/atomisp-hybrid-kmod.latest` al naar een versie-SRPM wijst,
+dan zat de valkuil meestal in de spec-macro fallback (`src_version -> 0`) tijdens `akmodsbuild --rebuild`.
+
+Na installeren van een nieuwere akmod package met gefixte spec, maak oude cache-output weg en forceer opnieuw:
+
+```bash
+sudo rm -f /var/cache/akmods/atomisp-hybrid/*.log
+sudo rm -f /var/cache/akmods/atomisp-hybrid/*.failed.log
+sudo rm -f /var/cache/akmods/atomisp-hybrid/*.rpm
+sudo akmods --force --kernels "$(uname -r)" --akmod atomisp-hybrid
+```
 
 ## 4. Belangrijke randvoorwaarden
 

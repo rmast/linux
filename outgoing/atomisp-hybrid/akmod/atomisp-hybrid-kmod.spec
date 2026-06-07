@@ -1,5 +1,5 @@
 %global kmod_name atomisp-hybrid
-%global src_version %{?src_version}%{!?src_version:0}
+%global src_version %{?src_version}%{!?src_version:%(ls -1 %{_sourcedir}/%{kmod_name}-*.tar.gz 2>/dev/null | head -n1 | sed -e 's#.*/%{kmod_name}-##' -e 's#\.tar\.gz$##')}
 %global kernels %{?kernels:%{kernels}}%{!?kernels:%(uname -r)}
 %global debug_package %{nil}
 %global _debugsource_packages 0

@@ -118,10 +118,16 @@ modinfo ipu_bridge | head
 
 Als je daar nog paden ziet onder `/kernel/drivers/...`, dan is de override nog niet actief.
 De package installeert de modules onder `extra/atomisp-hybrid/` en gebruikt daarnaast
-een `depmod.d` override voor `mt9m114` en `ipu_bridge`, zodat:
+`depmod.d` overrides voor `atomisp`, `atomisp_gmin_platform`, `mt9m114` en `ipu_bridge`, zodat:
 
 - `akmods` de kmods als "al gebouwd" herkent
 - jouw vervangende modules toch voorrang krijgen op de Fedora in-tree modules
+
+Waarom niet in `updates/`:
+- `updates/` heeft inderdaad van nature voorrang in module lookup
+- maar `akmods` controleert expliciet op package-state rond `extra/<naam>`
+- direct onder `updates/<naam>` installeren leidt daardoor vaak tot onnodige rebuilds bij boot
+- met `extra/` + `depmod` overrides krijg je dezelfde functionele voorrang, zonder die akmods-loop
 
 Als `modprobe` faalt, check eerst de akmods-buildlog:
 

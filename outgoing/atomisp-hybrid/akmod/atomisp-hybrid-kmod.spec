@@ -54,6 +54,8 @@ done
 rm -rf %{buildroot}
 install -d %{buildroot}/usr/lib/depmod.d
 cat > %{buildroot}/usr/lib/depmod.d/atomisp-hybrid.conf <<'EOF'
+override atomisp * extra/atomisp-hybrid
+override atomisp_gmin_platform * extra/atomisp-hybrid
 override mt9m114 * extra/atomisp-hybrid
 override ipu_bridge * extra/atomisp-hybrid
 EOF
@@ -77,6 +79,7 @@ done
 
 %files
 /usr/lib/depmod.d/atomisp-hybrid.conf
+%dir /lib/modules/*/extra/%{kmod_name}
 /lib/modules/*/extra/%{kmod_name}/*.ko*
 
 %changelog

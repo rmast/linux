@@ -5,7 +5,8 @@
 %global _debugsource_packages 0
 %global _debuginfo_subpackages 0
 %global _enable_debug_packages 0
-%global _source_date_epoch_from_changelog 0
+%global source_date_epoch_from_changelog 0
+%global clamp_mtime_to_source_date_epoch 0
 
 Name:           %{kmod_name}-kmod
 Version:        %{src_version}

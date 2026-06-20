@@ -114,6 +114,11 @@ modinfo atomisp | head
 lsmod | grep -E 'atomisp|ipu_bridge|mt9m114'
 ```
 
+Let op over bestandstijd (`ls -l`):
+- een `.ko` datum is geen betrouwbare indicatie dat je oude code draait
+- RPM/reproducible-build instellingen kunnen mtime clampen naar een vaste tijd
+- verifieer liever packageversie + modulepad (`rpm -q atomisp-hybrid-kmod`, `modinfo -F filename mt9m114`)
+
 Controleer ook dat vervangende modules echt uit `updates/` komen en niet uit de distro-kernel:
 
 ```bash
@@ -225,3 +230,15 @@ ls -l /usr/src/akmods
 ```
 
 Als je alleen een map zoals `/usr/src/akmods/atomisp-hybrid-0` ziet, dan kan `akmods` die niet gebruiken.
+
+Rest van de installatie (de firmwares moeten tijdens boot op initrd beschikbaar zijn):
+sudo lsinitrd /boot/initramfs-$(uname -r).img | rg -n "intel/ipu/shisp|shisp_2401a0|shisp_2400b0"
+sudo tee /etc/dracut.conf.d/99-atomisp-firmware.conf >/dev/null <<'EOF'
+install_items+=" /usr/lib/firmware/intel/ipu/shisp_2400b0_v21.bin.xz /usr/lib/firmware/intel/ipu/shisp_2401a0_v21.bin.xz "
+EOF
+
+Deze moeten geblacklist, anders zitten ze in de weg van atomisp:
+printf "blacklist intel_atomisp2_pm\nblacklist intel_atomisp2_led\n" | sudo tee /etc/modprobe.d/blacklist-atomisp2-pm.conf
+sudo dracut -f
+
+

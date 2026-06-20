@@ -1424,13 +1424,16 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 
 	/*
 	 * The maximum coarse integration time is the frame length in lines
-	 * minus two. The default is taken directly from the datasheet, but
-	 * makes little sense as auto-exposure is enabled by default.
+	 * minus two. Use a mid-range default so that when auto-exposure is
+	 * disabled (e.g. when driven by an external ISP such as AtomISP that
+	 * performs its own AE via digital gain) the image starts at a
+	 * usable brightness.
 	 */
 	max_exposure = MT9M114_PIXEL_ARRAY_HEIGHT + MT9M114_MIN_VBLANK - 2;
 	sensor->pa.exposure = v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops,
 						V4L2_CID_EXPOSURE, 1,
-						max_exposure, 1, 16);
+						max_exposure, 1,
+						max_exposure / 2);
 	if (sensor->pa.exposure)
 		sensor->pa.exposure->flags |= V4L2_CTRL_FLAG_VOLATILE;
 

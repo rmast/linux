@@ -35,5 +35,8 @@ ln -s %{kmod_name}-kmod-%{version}-%{release}.src.rpm %{buildroot}%{_usrsrc}/akm
 %{_usrsrc}/akmods/%{kmod_name}-kmod.latest
 
 %changelog
+* Fri Jun 21 2026 Maintainer <maintainer@example.invalid> - %{src_version}-1
+- Rebuild wrapper with updated kmod SRPM
+
 * Sat Jun 06 2026 Maintainer <maintainer@example.invalid> - 0-1
 - Install kmod SRPM payload and -kmod.latest symlink for akmods

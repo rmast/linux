@@ -117,6 +117,8 @@ lsmod | grep -E 'atomisp|ipu_bridge|mt9m114'
 Let op over bestandstijd (`ls -l`):
 - een `.ko` datum is geen betrouwbare indicatie dat je oude code draait
 - RPM/reproducible-build instellingen kunnen mtime clampen naar een vaste tijd
+- de eerste regel van `%changelog` in de kmod-spec bepaalt `SOURCE_DATE_EPOCH`
+- zorg dat die datum actueel is zodat gecompileerde modules een recente mtime krijgen
 - verifieer liever packageversie + modulepad (`rpm -q atomisp-hybrid-kmod`, `modinfo -F filename mt9m114`)
 
 Controleer ook dat vervangende modules echt uit `updates/` komen en niet uit de distro-kernel:

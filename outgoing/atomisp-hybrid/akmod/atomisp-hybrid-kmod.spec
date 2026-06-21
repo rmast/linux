@@ -85,7 +85,7 @@ done
 /lib/modules/*/extra/%{kmod_name}/*.ko*
 
 %changelog
-* Fri Jun 21 2026 R. Mast <rmast@example.invalid> - %{src_version}-1
+* Fri Jun 21 2026 R. Mast <rmast@example.invalid> - 1-1
 - Rebuild with updated source
 
 * Sat Jun 06 2026 R. Mast <rmast@example.invalid> - 0-1

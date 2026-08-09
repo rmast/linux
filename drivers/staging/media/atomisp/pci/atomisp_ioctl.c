@@ -586,6 +586,12 @@ static int atomisp_enum_framesizes(struct file *file, void *priv,
 		return atomisp_enum_framesizes_crop(isp, fsize);
 
 	if (input->sensor_isp) {
+		/*
+		 * Query the IFP source pad with its native mbus code; a
+		 * capture-format code is not meaningful to the IFP here.
+		 */
+		fse.pad = SENSOR_ISP_PAD_SOURCE;
+		fse.code = atomisp_get_enum_mbus_code(input);
 		act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor_isp);
 		ret = v4l2_subdev_call(input->sensor_isp, pad, enum_frame_size,
 				       act_sd_state, &fse);
@@ -633,6 +639,12 @@ static int atomisp_enum_frameintervals(struct file *file, void *priv,
 	fie.code = format->mbus_code;
 
 	if (input->sensor_isp) {
+		/*
+		 * Query the IFP source pad with its actual mbus code; the
+		 * capture pixel format code is not a valid IFP source code.
+		 */
+		fie.pad = SENSOR_ISP_PAD_SOURCE;
+		fie.code = atomisp_get_enum_mbus_code(input);
 		act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor_isp);
 		ret = v4l2_subdev_call(input->sensor_isp, pad, enum_frame_interval,
 				       act_sd_state, &fie);

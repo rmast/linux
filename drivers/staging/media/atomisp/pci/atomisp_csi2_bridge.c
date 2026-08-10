@@ -84,7 +84,7 @@ static struct gmin_cfg_var xiaomi_mipad2_vars[] = {
 
 static struct gmin_cfg_var hp_x2_210_vars[] = {
 	/* MT9M114/Unicam m1040 is physically mounted upside-down on this model */
-	{ "INT33F0:00", "Rotation", "180" },
+	{ "INT33BE:00", "Rotation", "180" },
 	{},
 };
 

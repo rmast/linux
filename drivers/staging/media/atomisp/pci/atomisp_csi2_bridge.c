@@ -84,7 +84,7 @@ static struct gmin_cfg_var xiaomi_mipad2_vars[] = {
 
 static struct gmin_cfg_var hp_x2_210_vars[] = {
 	/* MT9M114/Unicam m1040 is physically mounted upside-down on this model */
-	{ "INT33BE:00", "Rotation", "180" },
+	{ "INT33F0:00", "Rotation", "180" },
 	{},
 };
 
@@ -437,13 +437,21 @@ static int atomisp_csi2_parse_sensor_fwnode(struct acpi_device *adev,
 	 * ACPI _PLD, which is more accurate than a port-number heuristic for
 	 * boards whose camera is rotated or wired unusually.
 	 */
-	rotation = gmin_cfg_get_int(adev, "Rotation", 0);
-	if (rotation != 0 && rotation != 180) {
+	/*
+	 * Allow a DMI override to correct boards where the SSDB reports the
+	 * wrong rotation (or no rotation at all).  Use -1 as sentinel so we
+	 * can distinguish "not set" from "explicitly 0".
+	 */
+	rotation = gmin_cfg_get_int(adev, "Rotation", -1);
+	if (rotation == -1) {
+		/* No DMI override — keep whatever ipu_bridge_parse_ssdb set. */
+	} else if (rotation != 0 && rotation != 180) {
 		acpi_handle_warn(adev->handle, "%s: Invalid Rotation=%d, using 0\n",
 				 dev_name(&adev->dev), rotation);
-		rotation = 0;
+		sensor->rotation = 0;
+	} else {
+		sensor->rotation = rotation;
 	}
-	sensor->rotation = rotation;
 	sensor->orientation = (sensor->link == 1) ?
 		V4L2_FWNODE_ORIENTATION_BACK : V4L2_FWNODE_ORIENTATION_FRONT;
 

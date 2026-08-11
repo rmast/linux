@@ -15,6 +15,7 @@
 #include <linux/delay.h>
 #include <linux/errno.h>
 #include <linux/gpio/consumer.h>
+#include <linux/dmi.h>
 #include <linux/i2c.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
@@ -2578,6 +2579,12 @@ read_slew_rate:
 			"Failed to parse fwnode properties\n");
 		return ret;
 	}
+
+	/* SSDB/bridge fwnode path doesn't reach this sensor on gmin platforms */
+	if (sensor->fwnode_props.rotation == 0 &&
+	    dmi_match(DMI_SYS_VENDOR, "Hewlett-Packard") &&
+	    dmi_match(DMI_PRODUCT_NAME, "HP x2 210"))
+		sensor->fwnode_props.rotation = 180;
 
 	if (sensor->fwnode_props.rotation != V4L2_FWNODE_PROPERTY_UNSET &&
 	    sensor->fwnode_props.rotation != 0 &&

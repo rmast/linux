@@ -1107,31 +1107,40 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct mt9m114 *sensor = pa_ctrl_to_mt9m114(ctrl);
 	const struct v4l2_mbus_framefmt *format;
 	struct v4l2_subdev_state *state;
+	bool apply;
 	int ret = 0;
 	u64 mask;
 
-	/* V4L2 controls values are applied only when power is up. */
-	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
-		return 0;
+	/* Apply controls to hardware only when power is up. */
+	apply = pm_runtime_get_if_in_use(&sensor->client->dev);
 
 	state = v4l2_subdev_get_locked_active_state(&sensor->pa.sd);
 	format = v4l2_subdev_state_get_format(state, 0);
 
 	switch (ctrl->id) {
 	case V4L2_CID_HBLANK:
-		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_LINE_LENGTH_PCK,
-			  ctrl->val + format->width, &ret);
+		if (apply)
+			cci_write(sensor->regmap,
+				  MT9M114_CAM_SENSOR_CFG_LINE_LENGTH_PCK,
+				  ctrl->val + format->width, &ret);
 		break;
 
 	case V4L2_CID_VBLANK:
-		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
-			  ctrl->val + format->height, &ret);
+		if (apply)
+			cci_write(sensor->regmap,
+				  MT9M114_CAM_SENSOR_CFG_FRAME_LENGTH_LINES,
+				  ctrl->val + format->height, &ret);
+		__v4l2_ctrl_modify_range(sensor->pa.exposure, 1,
+					 format->height + ctrl->val - 2,
+					 1,
+					 (format->height + ctrl->val - 2) / 2);
 		break;
 
 	case V4L2_CID_EXPOSURE:
-		cci_write(sensor->regmap,
-			  MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
-			  ctrl->val, &ret);
+		if (apply)
+			cci_write(sensor->regmap,
+				  MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
+				  ctrl->val, &ret);
 		break;
 
 	case V4L2_CID_ANALOGUE_GAIN:
@@ -1140,22 +1149,26 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 		 * gain values that are mapped to the GLOBAL_GAIN register
 		 * values by the sensor firmware.
 		 */
-		cci_write(sensor->regmap, MT9M114_CAM_SENSOR_CONTROL_ANALOG_GAIN,
-			  ctrl->val, &ret);
+		if (apply)
+			cci_write(sensor->regmap,
+				  MT9M114_CAM_SENSOR_CONTROL_ANALOG_GAIN,
+				  ctrl->val, &ret);
 		break;
 
 	case V4L2_CID_HFLIP:
 		mask = MT9M114_CAM_SENSOR_CONTROL_HORZ_MIRROR_EN;
-		ret = cci_update_bits(sensor->regmap,
-				      MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
-				      mask, ctrl->val ? mask : 0, NULL);
+		if (apply)
+			ret = cci_update_bits(sensor->regmap,
+					      MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
+					      mask, ctrl->val ? mask : 0, NULL);
 		break;
 
 	case V4L2_CID_VFLIP:
 		mask = MT9M114_CAM_SENSOR_CONTROL_VERT_FLIP_EN;
-		ret = cci_update_bits(sensor->regmap,
-				      MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
-				      mask, ctrl->val ? mask : 0, NULL);
+		if (apply)
+			ret = cci_update_bits(sensor->regmap,
+					      MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
+					      mask, ctrl->val ? mask : 0, NULL);
 		break;
 
 	default:
@@ -1163,7 +1176,8 @@ static int mt9m114_pa_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	}
 
-	pm_runtime_put_autosuspend(&sensor->client->dev);
+	if (apply)
+		pm_runtime_put_autosuspend(&sensor->client->dev);
 
 	return ret;
 }
@@ -1199,6 +1213,8 @@ static void mt9m114_pa_ctrl_update_blanking(struct mt9m114 *sensor,
 					    const struct v4l2_mbus_framefmt *format)
 {
 	unsigned int max_blank;
+	unsigned int vblank;
+	unsigned int max_exposure;
 
 	/* Update the blanking controls ranges based on the output size. */
 	max_blank = MT9M114_CAM_SENSOR_CFG_LINE_LENGTH_PCK_MAX
@@ -1210,6 +1226,12 @@ static void mt9m114_pa_ctrl_update_blanking(struct mt9m114 *sensor,
 		  - format->height;
 	__v4l2_ctrl_modify_range(sensor->pa.vblank, MT9M114_MIN_VBLANK,
 				 max_blank, 1, MT9M114_DEF_VBLANK);
+
+	vblank = clamp_t(unsigned int, sensor->pa.vblank->val,
+			 MT9M114_MIN_VBLANK, max_blank);
+	max_exposure = format->height + vblank - 2;
+	__v4l2_ctrl_modify_range(sensor->pa.exposure, 1,
+				 max_exposure, 1, max_exposure / 2);
 }
 
 /* -----------------------------------------------------------------------------

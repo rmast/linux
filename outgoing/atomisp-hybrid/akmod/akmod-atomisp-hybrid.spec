@@ -1,7 +1,5 @@
 %global kmod_name atomisp-hybrid
 %global src_version %{?src_version}%{!?src_version:0}
-%global source_date_epoch_from_changelog 0
-%global clamp_mtime_to_source_date_epoch 0
 
 Name:           akmod-%{kmod_name}
 Version:        %{src_version}

@@ -16,6 +16,30 @@ Defaults:
 EOF
 }
 
+inject_module_metadata() {
+  local file="$1"
+  local tmp
+
+  if grep -q 'MODULE_INFO(atomisp_hybrid_describe' "$file"; then
+    return
+  fi
+
+  tmp="$(mktemp)"
+  awk -v version="$VERSION" -v commit="$HEAD_COMMIT" -v base_commit="$BASE_COMMIT" -v describe="$HEAD_DESCRIBE" '
+    /MODULE_DESCRIPTION\(/ && !done {
+      print
+      print "MODULE_VERSION(\"" version "\");"
+      print "MODULE_INFO(atomisp_hybrid_commit, \"" commit "\");"
+      print "MODULE_INFO(atomisp_hybrid_base_commit, \"" base_commit "\");"
+      print "MODULE_INFO(atomisp_hybrid_describe, \"" describe "\");"
+      done = 1
+      next
+    }
+    { print }
+  ' "$file" > "$tmp"
+  mv "$tmp" "$file"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base)
@@ -53,6 +77,8 @@ if ! git merge-base --is-ancestor "$BASE_COMMIT" HEAD; then
 fi
 
 HEAD_SHORT="$(git rev-parse --short HEAD)"
+HEAD_COMMIT="$(git rev-parse HEAD)"
+HEAD_DESCRIBE="$(git describe --always --dirty --tags 2>/dev/null || git rev-parse --short HEAD)"
 STAMP="$(date +%Y%m%d)"
 HEAD_EPOCH="$(git show -s --format=%ct HEAD)"
 # Use 'gitz' to sort newer than older 'git<hex>' builds, then compare numerically.
@@ -87,6 +113,11 @@ sed -i \
   -e "s/#MODULE_NAME#/${PKG_NAME}/g" \
   -e "s/#MODULE_VERSION#/${VERSION}/g" \
   "$PKG_DIR/dkms.conf"
+
+inject_module_metadata "$PKG_DIR/drivers/staging/media/atomisp/pci/atomisp_v4l2.c"
+inject_module_metadata "$PKG_DIR/drivers/staging/media/atomisp/pci/atomisp_gmin_platform.c"
+inject_module_metadata "$PKG_DIR/external/ipu-bridge/ipu-bridge.c"
+inject_module_metadata "$PKG_DIR/external/mt9m114/mt9m114.c"
 
 # Patch the atomisp Makefile for out-of-tree (DKMS/akmod) builds:
 # 1. Replace the hardcoded srctree path with M-based path

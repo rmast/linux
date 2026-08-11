@@ -51,7 +51,17 @@ Controle:
 modinfo atomisp | head
 modinfo ipu-bridge | head
 modinfo mt9m114 | head
+modinfo -F version mt9m114
+modinfo -F atomisp_hybrid_commit mt9m114
+modinfo -F atomisp_hybrid_base_commit mt9m114
+modinfo -F atomisp_hybrid_describe mt9m114
 ```
+
+De export injecteert daarnaast `MODULE_VERSION(<exportversie>)` en een custom
+`MODULE_INFO(...)`-set met `atomisp_hybrid_commit`, `atomisp_hybrid_base_commit`
+en `atomisp_hybrid_describe` in de gebouwde modules, zodat je via `modinfo`
+direct kunt zien uit welke export, basiscommit en git-omschrijving een `.ko`
+komt.
 
 ## 3. akmod gebruik
 
@@ -116,9 +126,7 @@ lsmod | grep -E 'atomisp|ipu_bridge|mt9m114'
 
 Let op over bestandstijd (`ls -l`):
 - een `.ko` datum is geen betrouwbare indicatie dat je oude code draait
-- RPM/reproducible-build instellingen kunnen mtime clampen naar een vaste tijd
-- de eerste regel van `%changelog` in de kmod-spec bepaalt `SOURCE_DATE_EPOCH`
-- zorg dat die datum actueel is zodat gecompileerde modules een recente mtime krijgen
+- RPM-installatie bewaart de timestamp uit het pakket; die is niet hetzelfde als het installatiemoment
 - verifieer liever packageversie + modulepad (`rpm -q atomisp-hybrid-kmod`, `modinfo -F filename mt9m114`)
 
 Controleer ook dat vervangende modules echt uit `updates/` komen en niet uit de distro-kernel:

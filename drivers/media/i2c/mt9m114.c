@@ -999,6 +999,29 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 	if (ret)
 		goto error;
 
+	/*
+	 * CONFIG_CHANGE reloads the mt9m114 firmware's internal register
+	 * shadow, which resets READ_MODE to the firmware default (HFLIP=0,
+	 * VFLIP=0).  Re-apply the cached flip values directly so the
+	 * physical sensor readout direction matches the V4L2 control state.
+	 */
+	if (sensor->pa.hflip)
+		cci_update_bits(sensor->regmap,
+				MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
+				MT9M114_CAM_SENSOR_CONTROL_HORZ_MIRROR_EN,
+				sensor->pa.hflip->val ?
+				MT9M114_CAM_SENSOR_CONTROL_HORZ_MIRROR_EN : 0,
+				&ret);
+	if (sensor->pa.vflip)
+		cci_update_bits(sensor->regmap,
+				MT9M114_CAM_SENSOR_CONTROL_READ_MODE,
+				MT9M114_CAM_SENSOR_CONTROL_VERT_FLIP_EN,
+				sensor->pa.vflip->val ?
+				MT9M114_CAM_SENSOR_CONTROL_VERT_FLIP_EN : 0,
+				&ret);
+	if (ret)
+		goto error;
+
 	sensor->streaming = true;
 
 	return 0;

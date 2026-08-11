@@ -438,13 +438,16 @@ static int atomisp_csi2_parse_sensor_fwnode(struct acpi_device *adev,
 	 * boards whose camera is rotated or wired unusually.
 	 */
 	/*
-	 * Allow a DMI override to correct boards where the SSDB reports the
-	 * wrong rotation (or no rotation at all).  Use -1 as sentinel so we
-	 * can distinguish "not set" from "explicitly 0".
+	 * ipu_bridge_parse_rotation() checks acpi_dev_hid_match() against the
+	 * DMI driver_data ("INT33F0"), which only matches when the ISP itself
+	 * is adev — not individual sensor ACPI devices (e.g. INT33BE).  Apply
+	 * a board-specific DMI override here that is HID-independent.
+	 *
+	 * Fall back to the gmin_cfg table for any other per-device key.
 	 */
 	rotation = gmin_cfg_get_int(adev, "Rotation", -1);
 	if (rotation == -1) {
-		/* No DMI override — keep whatever ipu_bridge_parse_ssdb set. */
+		/* gmin_cfg found nothing — trust ipu_bridge_parse_ssdb. */
 	} else if (rotation != 0 && rotation != 180) {
 		acpi_handle_warn(adev->handle, "%s: Invalid Rotation=%d, using 0\n",
 				 dev_name(&adev->dev), rotation);
@@ -452,6 +455,11 @@ static int atomisp_csi2_parse_sensor_fwnode(struct acpi_device *adev,
 	} else {
 		sensor->rotation = rotation;
 	}
+
+	/* Board-level override: sensors on this model are physically inverted */
+	if (dmi_match(DMI_SYS_VENDOR, "Hewlett-Packard") &&
+	    dmi_match(DMI_PRODUCT_NAME, "HP x2 210"))
+		sensor->rotation = 180;
 	sensor->orientation = (sensor->link == 1) ?
 		V4L2_FWNODE_ORIENTATION_BACK : V4L2_FWNODE_ORIENTATION_FRONT;
 

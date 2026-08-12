@@ -2626,7 +2626,8 @@ read_slew_rate:
 	}
 
 	/* SSDB/bridge fwnode path doesn't reach this sensor on gmin platforms */
-	if (sensor->fwnode_props.rotation == 0 &&
+	if ((sensor->fwnode_props.rotation == 0 ||
+	     sensor->fwnode_props.rotation == V4L2_FWNODE_PROPERTY_UNSET) &&
 	    dmi_match(DMI_SYS_VENDOR, "Hewlett-Packard") &&
 	    dmi_match(DMI_PRODUCT_NAME, "HP x2 210"))
 		sensor->fwnode_props.rotation = 180;

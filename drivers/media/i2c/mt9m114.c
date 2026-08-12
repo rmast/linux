@@ -2559,6 +2559,8 @@ static int mt9m114_identify(struct mt9m114 *sensor)
 
 static int mt9m114_parse_dt(struct mt9m114 *sensor)
 {
+	const char *product_family;
+	const char *product_name;
 	struct fwnode_handle *fwnode;
 	struct fwnode_handle *ep;
 	int ret;
@@ -2625,12 +2627,21 @@ read_slew_rate:
 		return ret;
 	}
 
+	product_name = dmi_get_system_info(DMI_PRODUCT_NAME);
+	product_family = dmi_get_system_info(DMI_PRODUCT_FAMILY);
+
 	/* SSDB/bridge fwnode path doesn't reach this sensor on gmin platforms */
 	if ((sensor->fwnode_props.rotation == 0 ||
 	     sensor->fwnode_props.rotation == V4L2_FWNODE_PROPERTY_UNSET) &&
-	    dmi_match(DMI_SYS_VENDOR, "Hewlett-Packard") &&
-	    dmi_match(DMI_PRODUCT_NAME, "HP x2 210"))
+	    (dmi_name_in_vendors("HP") ||
+	     dmi_name_in_vendors("Hewlett-Packard")) &&
+	    ((product_name && strstr(product_name, "HP x2 210")) ||
+	     (product_family && strstr(product_family, "HP x2 210")))) {
 		sensor->fwnode_props.rotation = 180;
+		dev_info(&sensor->client->dev,
+			 "applying HP x2 210 180-degree rotation quirk (%s, %s)\n",
+			 product_name ?: "unknown", product_family ?: "unknown");
+	}
 
 	if (sensor->fwnode_props.rotation != V4L2_FWNODE_PROPERTY_UNSET &&
 	    sensor->fwnode_props.rotation != 0 &&

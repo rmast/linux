@@ -421,7 +421,6 @@ struct mt9m114 {
 
 		struct v4l2_ctrl_handler hdl;
 		unsigned int frame_rate;
-		bool ae_auto;
 
 		struct v4l2_ctrl *tpg[4];
 		struct completion unregistered;
@@ -948,9 +947,8 @@ static int mt9m114_configure_ifp(struct mt9m114 *sensor,
 
 static int mt9m114_set_frame_rate(struct mt9m114 *sensor)
 {
-	unsigned int min_fps = sensor->ifp.ae_auto
-		? MT9M114_MIN_FRAME_RATE_FLOOR
-		: sensor->ifp.frame_rate;
+	/* Both firmware AE and an external ISP may require long frame durations. */
+	unsigned int min_fps = MT9M114_MIN_FRAME_RATE_FLOOR;
 	u16 min_rate;
 	u16 max_rate;
 	int ret = 0;
@@ -1591,9 +1589,8 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 	int ret = 0;
 
 	if (ctrl->id == V4L2_CID_EXPOSURE_AUTO) {
-		sensor->ifp.ae_auto = ctrl->val == V4L2_EXPOSURE_AUTO;
 		mt9m114_pa_ctrl_update_exposure(sensor,
-					!sensor->ifp.ae_auto);
+					ctrl->val != V4L2_EXPOSURE_AUTO);
 	}
 
 	/* V4L2 controls values are applied only when power is up. */

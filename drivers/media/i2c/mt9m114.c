@@ -345,6 +345,7 @@
 
 #define MT9M114_DEF_FRAME_RATE				30
 #define MT9M114_MAX_FRAME_RATE				120
+#define MT9M114_MIN_FRAME_RATE_FLOOR			1
 
 #define MT9M114_DEF_PIXCLOCK				48000000
 
@@ -420,6 +421,7 @@ struct mt9m114 {
 
 		struct v4l2_ctrl_handler hdl;
 		unsigned int frame_rate;
+		bool ae_auto;
 
 		struct v4l2_ctrl *tpg[4];
 		struct completion unregistered;
@@ -946,13 +948,23 @@ static int mt9m114_configure_ifp(struct mt9m114 *sensor,
 
 static int mt9m114_set_frame_rate(struct mt9m114 *sensor)
 {
-	u16 frame_rate = sensor->ifp.frame_rate << 8;
+	unsigned int min_fps = sensor->ifp.ae_auto
+		? MT9M114_MIN_FRAME_RATE_FLOOR
+		: sensor->ifp.frame_rate;
+	u16 min_rate;
+	u16 max_rate;
 	int ret = 0;
 
+	min_fps = min(min_fps, sensor->ifp.frame_rate);
+	min_rate = min_fps << 8;
+	max_rate = sensor->ifp.frame_rate << 8;
+
 	cci_write(sensor->regmap, MT9M114_CAM_AET_MIN_FRAME_RATE,
-		  frame_rate, &ret);
+		  min_rate, &ret);
 	cci_write(sensor->regmap, MT9M114_CAM_AET_MAX_FRAME_RATE,
-		  frame_rate, &ret);
+		  max_rate, &ret);
+	dev_dbg(&sensor->client->dev, "AE frame-rate range: %u-%u fps\n",
+		min_fps, sensor->ifp.frame_rate);
 
 	return ret;
 }
@@ -1578,9 +1590,11 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 	u32 value;
 	int ret = 0;
 
-	if (ctrl->id == V4L2_CID_EXPOSURE_AUTO)
+	if (ctrl->id == V4L2_CID_EXPOSURE_AUTO) {
+		sensor->ifp.ae_auto = ctrl->val == V4L2_EXPOSURE_AUTO;
 		mt9m114_pa_ctrl_update_exposure(sensor,
-						ctrl->val != V4L2_EXPOSURE_AUTO);
+					!sensor->ifp.ae_auto);
+	}
 
 	/* V4L2 controls values are applied only when power is up. */
 	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
@@ -1615,6 +1629,8 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 		cci_write(sensor->regmap, MT9M114_AE_TRACK_ALGO, value, &ret);
 		if (ret)
 			break;
+
+		ret = mt9m114_set_frame_rate(sensor);
 
 		break;
 

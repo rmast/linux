@@ -82,9 +82,10 @@ rpmdev-setuptree
 cp outgoing/atomisp-hybrid/akmod/atomisp-hybrid-kmod.spec ~/rpmbuild/SPECS/
 cp outgoing/atomisp-hybrid/akmod/akmod-atomisp-hybrid.spec ~/rpmbuild/SPECS/
 
-# Gebruik de versie uit de gegenereerde dist-tarballnaam.
-ver="$(basename outgoing/atomisp-hybrid/dist/atomisp-hybrid-*.tar.gz .tar.gz | sed 's/^atomisp-hybrid-//')"
-cp "outgoing/atomisp-hybrid/dist/atomisp-hybrid-${ver}.tar.gz" ~/rpmbuild/SOURCES/
+# Gebruik expliciet de nieuwste gegenereerde dist-tarball.
+latest_tar="$(ls -1t outgoing/atomisp-hybrid/dist/atomisp-hybrid-*.tar.gz | head -n1)"
+ver="$(basename "$latest_tar" .tar.gz | sed 's/^atomisp-hybrid-//')"
+cp "$latest_tar" ~/rpmbuild/SOURCES/
 
 # 1) Maak eerst de kmod source RPM
 rpmbuild -bs --define "src_version ${ver}" ~/rpmbuild/SPECS/atomisp-hybrid-kmod.spec
@@ -95,15 +96,33 @@ cp ~/rpmbuild/SRPMS/atomisp-hybrid-kmod-${ver}-1.fc44.src.rpm ~/rpmbuild/SOURCES
 # Controleer desnoods expliciet dat de ingebedde spec ook echt deze versie draagt.
 rpm -qp --qf '%{NAME} %{VERSION}-%{RELEASE}\n' ~/rpmbuild/SRPMS/atomisp-hybrid-kmod-${ver}-1.fc44.src.rpm
 
+# Controleer dat de tarball met exact deze versie ook in SOURCES staat.
+ls -l ~/rpmbuild/SOURCES/atomisp-hybrid-${ver}.tar.gz
+
 # 3) Bouw en installeer de akmod noarch package
 rpmbuild -ba --define "src_version ${ver}" ~/rpmbuild/SPECS/akmod-atomisp-hybrid.spec
 sudo dnf install ~/rpmbuild/RPMS/noarch/akmod-atomisp-hybrid-${ver}-1.fc44.noarch.rpm
+
+# Forceer rebuild vanuit de zojuist geinstalleerde akmod source payload.
+sudo rm -f /var/cache/akmods/atomisp-hybrid/*.log
+sudo rm -f /var/cache/akmods/atomisp-hybrid/*.failed.log
+sudo rm -f /var/cache/akmods/atomisp-hybrid/*.rpm
+sudo akmods --force --kernels "$(uname -r)" --akmod atomisp-hybrid
+sudo depmod -a "$(uname -r)"
+
+# Verifieer metadata op de daadwerkelijk geinstalleerde modulefile.
+modfile="$(modinfo -F filename mt9m114)"
+echo "$modfile"
+modinfo -F version "$modfile"
+modinfo -F atomisp_hybrid_commit "$modfile"
+modinfo -F atomisp_hybrid_base_commit "$modfile"
+modinfo -F atomisp_hybrid_describe "$modfile"
 ```
 
 Belangrijk:
 - installeer **niet** handmatig de `.src.rpm`; die wordt door de akmod package onder `/usr/src/akmods` geplaatst
 - `akmods` gebruikt specifiek `/usr/src/akmods/atomisp-hybrid-kmod.latest` en rebuild daarna de gelinkte `atomisp-hybrid-kmod-*.src.rpm`
-- meerdere oude `atomisp-hybrid-*.tar.gz` bestanden in `~/rpmbuild/SOURCES/` zijn niet erg; alleen de naam die exact matcht met `Source0` van de spec wordt gebruikt
+- meerdere oude `atomisp-hybrid-*.tar.gz` bestanden in `~/rpmbuild/SOURCES/` zijn niet erg, maar kies in je buildstappen altijd expliciet de nieuwste tarball zodat `src_version` en `Source0` bij elkaar blijven
 - de **wrapper** `akmod-atomisp-hybrid.spec` versioneren is niet genoeg; ook de onderliggende `atomisp-hybrid-kmod-*.src.rpm` moet correct zijn
 - als de kmod-spec `src_version` naar `0` laat vallen zonder `--define src_version`, dan zoekt `akmodsbuild` tijdens `%prep` naar `atomisp-hybrid-0.tar.gz`
 

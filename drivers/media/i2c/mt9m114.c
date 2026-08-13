@@ -989,10 +989,6 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 	if (ret)
 		goto error;
 
-	ret = mt9m114_set_frame_rate(sensor);
-	if (ret)
-		goto error;
-
 	ret = __v4l2_ctrl_handler_setup(&sensor->pa.hdl);
 	if (ret)
 		goto error;
@@ -1029,6 +1025,11 @@ static int mt9m114_start_streaming(struct mt9m114 *sensor,
 				sensor->pa.vflip->val ?
 				MT9M114_CAM_SENSOR_CONTROL_VERT_FLIP_EN : 0,
 				&ret);
+	if (ret)
+		goto error;
+
+	/* CONFIG_CHANGE reloads firmware defaults, including AET frame limits. */
+	ret = mt9m114_set_frame_rate(sensor);
 	if (ret)
 		goto error;
 

@@ -1600,15 +1600,25 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct mt9m114 *sensor = ifp_ctrl_to_mt9m114(ctrl);
 	u32 value;
 	int ret = 0;
+	bool powered;
 
 	if (ctrl->id == V4L2_CID_EXPOSURE_AUTO) {
+		dev_info(&sensor->client->dev,
+			 "V4L2 EXPOSURE_AUTO pid=%d comm=%s value=%d (%s)\n",
+			 current->pid, current->comm, ctrl->val,
+			 ctrl->val == V4L2_EXPOSURE_AUTO ? "auto" : "manual");
 		mt9m114_pa_ctrl_update_exposure(sensor,
 					ctrl->val != V4L2_EXPOSURE_AUTO);
 	}
 
 	/* V4L2 controls values are applied only when power is up. */
-	if (!pm_runtime_get_if_in_use(&sensor->client->dev))
+	powered = pm_runtime_get_if_in_use(&sensor->client->dev);
+	if (!powered) {
+		if (ctrl->id == V4L2_CID_EXPOSURE_AUTO)
+			dev_info(&sensor->client->dev,
+				 "V4L2 EXPOSURE_AUTO deferred: sensor not powered\n");
 		return 0;
+	}
 
 	switch (ctrl->id) {
 	case V4L2_CID_AUTO_WHITE_BALANCE:
@@ -1641,6 +1651,9 @@ static int mt9m114_ifp_s_ctrl(struct v4l2_ctrl *ctrl)
 			break;
 
 		ret = mt9m114_set_frame_rate(sensor);
+		dev_info(&sensor->client->dev,
+			 "V4L2 EXPOSURE_AUTO applied value=%d ae_reg=0x%08x ret=%d\n",
+			 ctrl->val, value, ret);
 
 		break;
 

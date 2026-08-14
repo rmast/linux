@@ -418,8 +418,21 @@ static int atomisp_s_fmt_cap(struct file *file, void *fh,
 			     struct v4l2_format *f)
 {
 	struct video_device *vdev = video_devdata(file);
+	struct atomisp_device *isp = video_get_drvdata(vdev);
+	int ret;
 
-	return atomisp_set_fmt(vdev, f);
+	dev_info(isp->dev,
+		 "native V4L2 S_FMT pid=%d comm=%s ask=%ux%u pixfmt=%p4cc field=%u\n",
+		 current->pid, current->comm, f->fmt.pix.width,
+		 f->fmt.pix.height, &f->fmt.pix.pixelformat, f->fmt.pix.field);
+	ret = atomisp_set_fmt(vdev, f);
+	dev_info(isp->dev,
+		 "native V4L2 S_FMT pid=%d comm=%s ret=%d got=%ux%u pixfmt=%p4cc bpl=%u size=%u\n",
+		 current->pid, current->comm, ret, f->fmt.pix.width,
+		 f->fmt.pix.height, &f->fmt.pix.pixelformat,
+		 f->fmt.pix.bytesperline, f->fmt.pix.sizeimage);
+
+	return ret;
 }
 
 /*
@@ -1423,12 +1436,18 @@ static int atomisp_s_parm(struct file *file, void *fh,
 	struct atomisp_sub_device *asd = atomisp_to_video_pipe(vdev)->asd;
 	int mode;
 	int rval;
-	int fps;
+	int fps = 0;
 
 	if (parm->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) {
 		dev_err(isp->dev, "unsupported v4l2 buf type\n");
 		return -EINVAL;
 	}
+
+	dev_info(isp->dev,
+		 "native V4L2 S_PARM pid=%d comm=%s mode=%u interval=%u/%u\n",
+		 current->pid, current->comm, parm->parm.capture.capturemode,
+		 parm->parm.capture.timeperframe.numerator,
+		 parm->parm.capture.timeperframe.denominator);
 
 	asd->high_speed_mode = false;
 	switch (parm->parm.capture.capturemode) {
@@ -1447,6 +1466,11 @@ static int atomisp_s_parm(struct file *file, void *fh,
 			if (fps > 30)
 				asd->high_speed_mode = true;
 		}
+
+		dev_info(isp->dev,
+			 "native V4L2 S_PARM result pid=%d comm=%s ret=%d interval=%u/%u fps=%d\n",
+			 current->pid, current->comm, rval, fi.interval.numerator,
+			 fi.interval.denominator, fps);
 
 		return rval == -ENOIOCTLCMD ? 0 : rval;
 	}

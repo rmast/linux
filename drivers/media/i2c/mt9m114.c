@@ -1217,11 +1217,33 @@ static void mt9m114_pa_ctrl_update_exposure(struct mt9m114 *sensor, bool manual)
 	 * will behave correctly
 	 */
 	if (manual) {
+		int ret = 0;
+
 		mt9m114_pa_g_ctrl(sensor->pa.exposure);
+		mt9m114_pa_g_ctrl(sensor->pa.gain);
+
+		/*
+		 * Native V4L2 apps (e.g. Firefox) often switch to manual mode
+		 * right after opening the device, before firmware AE has
+		 * converged from its low startup defaults. Boost unusably
+		 * dark values instead of leaving the image dark.
+		 */
+		if (sensor->pa.exposure->val < sensor->pa.exposure->maximum / 2) {
+			sensor->pa.exposure->val = sensor->pa.exposure->maximum;
+			cci_write(sensor->regmap,
+				  MT9M114_CAM_SENSOR_CONTROL_COARSE_INTEGRATION_TIME,
+				  sensor->pa.exposure->val, &ret);
+		}
+		if (sensor->pa.gain->val < 256) {
+			sensor->pa.gain->val = 511;
+			cci_write(sensor->regmap,
+				  MT9M114_CAM_SENSOR_CONTROL_ANALOG_GAIN,
+				  sensor->pa.gain->val, &ret);
+		}
+
 		sensor->pa.exposure->cur.val = sensor->pa.exposure->val;
 		sensor->pa.exposure->flags &= ~V4L2_CTRL_FLAG_VOLATILE;
 
-		mt9m114_pa_g_ctrl(sensor->pa.gain);
 		sensor->pa.gain->cur.val = sensor->pa.gain->val;
 		sensor->pa.gain->flags &= ~V4L2_CTRL_FLAG_VOLATILE;
 	} else {
@@ -2253,13 +2275,15 @@ static int mt9m114_ifp_init(struct mt9m114 *sensor)
 	/*
 	 * Default to manual exposure when used with an ISP (e.g. AtomISP)
 	 * that performs its own AE. Having both the sensor hardware AE and
-	 * the ISP AE active simultaneously causes oscillation.
+	 * the ISP AE active simultaneously causes oscillation. The sensor
+	 * firmware AE itself is also prone to slow dark/bright oscillation,
+	 * so manual is the safe default on all platforms; the startup boost
+	 * in mt9m114_pa_ctrl_update_exposure() avoids a dark image instead.
 	 */
 	v4l2_ctrl_new_std_menu(hdl, &mt9m114_ifp_ctrl_ops,
 			       V4L2_CID_EXPOSURE_AUTO,
 			       V4L2_EXPOSURE_MANUAL, 0,
-			       mt9m114_is_hp_x2_210() ? V4L2_EXPOSURE_AUTO
-							       : V4L2_EXPOSURE_MANUAL);
+			       V4L2_EXPOSURE_MANUAL);
 
 	if (sensor->bus_cfg.nr_of_link_frequencies) {
 		link_freq = v4l2_ctrl_new_int_menu(hdl, &mt9m114_ifp_ctrl_ops,

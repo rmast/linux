@@ -419,6 +419,7 @@ static int atomisp_s_fmt_cap(struct file *file, void *fh,
 {
 	struct video_device *vdev = video_devdata(file);
 	struct atomisp_device *isp = video_get_drvdata(vdev);
+	struct atomisp_sub_device *asd = atomisp_to_video_pipe(vdev)->asd;
 	int ret;
 
 	dev_info(isp->dev,
@@ -426,6 +427,20 @@ static int atomisp_s_fmt_cap(struct file *file, void *fh,
 		 current->pid, current->comm, f->fmt.pix.width,
 		 f->fmt.pix.height, &f->fmt.pix.pixelformat, f->fmt.pix.field);
 	ret = atomisp_set_fmt(vdev, f);
+	if (!ret && !asd->frame_interval_valid) {
+		struct v4l2_subdev_frame_interval fi = {
+			.interval = { .numerator = 1, .denominator = 30 },
+			.which = V4L2_SUBDEV_FORMAT_ACTIVE,
+		};
+
+		ret = v4l2_subdev_call_state_active(
+			isp->inputs[asd->input_curr].csi_remote_source,
+			pad, set_frame_interval, &fi);
+		if (!ret) {
+			asd->frame_interval = fi.interval;
+			asd->frame_interval_valid = true;
+		}
+	}
 	dev_info(isp->dev,
 		 "native V4L2 S_FMT pid=%d comm=%s ret=%d got=%ux%u pixfmt=%p4cc bpl=%u size=%u\n",
 		 current->pid, current->comm, ret, f->fmt.pix.width,
@@ -1424,6 +1439,8 @@ static int atomisp_g_parm(struct file *file, void *fh,
 	}
 
 	parm->parm.capture.capturemode = asd->run_mode->val;
+	if (asd->frame_interval_valid)
+		parm->parm.capture.timeperframe = asd->frame_interval;
 
 	return 0;
 }
@@ -1463,6 +1480,10 @@ static int atomisp_s_parm(struct file *file, void *fh,
 						     pad, set_frame_interval, &fi);
 		if (!rval)
 			parm->parm.capture.timeperframe = fi.interval;
+		if (!rval) {
+			asd->frame_interval = fi.interval;
+			asd->frame_interval_valid = true;
+		}
 
 		if (fi.interval.numerator != 0) {
 			fps = fi.interval.denominator / fi.interval.numerator;

@@ -289,6 +289,8 @@ struct atomisp_sub_device {
 
 	struct atomisp_resolution sensor_array_res;
 	bool high_speed_mode; /* Indicate whether now is a high speed mode */
+	struct v4l2_fract frame_interval;
+	bool frame_interval_valid;
 
 	unsigned int preview_exp_id;
 	unsigned int postview_exp_id;

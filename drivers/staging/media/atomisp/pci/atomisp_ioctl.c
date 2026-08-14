@@ -1444,15 +1444,18 @@ static int atomisp_s_parm(struct file *file, void *fh,
 	}
 
 	dev_info(isp->dev,
-		 "native V4L2 S_PARM pid=%d comm=%s mode=%u interval=%u/%u\n",
+		 "native V4L2 S_PARM pid=%d comm=%s mode=%u which=%u interval=%u/%u\n",
 		 current->pid, current->comm, parm->parm.capture.capturemode,
+		 V4L2_SUBDEV_FORMAT_ACTIVE,
 		 parm->parm.capture.timeperframe.numerator,
 		 parm->parm.capture.timeperframe.denominator);
 
 	asd->high_speed_mode = false;
 	switch (parm->parm.capture.capturemode) {
 	case CI_MODE_NONE: {
-		struct v4l2_subdev_frame_interval fi = {0};
+		struct v4l2_subdev_frame_interval fi = {
+			.which = V4L2_SUBDEV_FORMAT_ACTIVE,
+		};
 
 		fi.interval = parm->parm.capture.timeperframe;
 

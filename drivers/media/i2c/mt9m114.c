@@ -427,6 +427,16 @@ struct mt9m114 {
 	} ifp;
 };
 
+static bool mt9m114_is_hp_x2_210(void)
+{
+	const char *vendor = dmi_get_system_info(DMI_SYS_VENDOR);
+	const char *product = dmi_get_system_info(DMI_PRODUCT_NAME);
+
+	return vendor && product &&
+	       (strstr(vendor, "HP") || strstr(vendor, "Hewlett-Packard")) &&
+	       strstr(product, "HP x2 210");
+}
+
 /* -----------------------------------------------------------------------------
  * Formats
  */
@@ -1511,11 +1521,13 @@ static int mt9m114_pa_init(struct mt9m114 *sensor)
 	sensor->pa.hflip =
 		v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops, V4L2_CID_HFLIP,
 				  0, 1, 1,
-				  sensor->fwnode_props.rotation == 180 ? 1 : 0);
+				  sensor->fwnode_props.rotation == 180 ||
+				  mt9m114_is_hp_x2_210());
 	sensor->pa.vflip =
 		v4l2_ctrl_new_std(hdl, &mt9m114_pa_ctrl_ops, V4L2_CID_VFLIP,
 				  0, 1, 1,
-				  sensor->fwnode_props.rotation == 180 ? 1 : 0);
+				  sensor->fwnode_props.rotation == 180 ||
+				  mt9m114_is_hp_x2_210());
 
 	v4l2_ctrl_new_fwnode_properties(hdl, &mt9m114_pa_ctrl_ops, &sensor->fwnode_props);
 
@@ -2233,7 +2245,8 @@ static int mt9m114_ifp_init(struct mt9m114 *sensor)
 	v4l2_ctrl_new_std_menu(hdl, &mt9m114_ifp_ctrl_ops,
 			       V4L2_CID_EXPOSURE_AUTO,
 			       V4L2_EXPOSURE_MANUAL, 0,
-			       V4L2_EXPOSURE_MANUAL);
+			       mt9m114_is_hp_x2_210() ? V4L2_EXPOSURE_AUTO
+							       : V4L2_EXPOSURE_MANUAL);
 
 	if (sensor->bus_cfg.nr_of_link_frequencies) {
 		link_freq = v4l2_ctrl_new_int_menu(hdl, &mt9m114_ifp_ctrl_ops,

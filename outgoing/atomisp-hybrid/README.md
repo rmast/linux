@@ -300,4 +300,36 @@ Deze moeten geblacklist, anders zitten ze in de weg van atomisp:
 printf "blacklist intel_atomisp2_pm\nblacklist intel_atomisp2_led\n" | sudo tee /etc/modprobe.d/blacklist-atomisp2-pm.conf
 sudo dracut -f
 
+# Met deze regels verhinder je dat wireplumber telkens /dev/video0 vasthoudt:
 
+~/.config/wireplumber/wireplumber.conf.d/50-disable-camera-monitors.conf
+wireplumber.profiles = {
+  main = {
+    monitor.v4l2 = disabled
+    monitor.libcamera = disabled
+  }
+}
+
+systemctl --user restart wireplumber
+
+# Met deze regel zie je of /dev/video0 wordt vastgehouden door Wireplumber
+sudo fuser -v /dev/video0 /dev/media0 /dev/v4l-subdev4 /dev/v4l-subdev5
+
+
+In firefox staat in about:config media.webrtc.camera.allow-pipewire false.
+
+Met deze regel zie je welk firefox proces met de camera bezig is:
+for p in `pgrep -f firefox`; do ls -l /proc/$p/fd 2>/dev/null | grep -q /dev/video0 && echo "video0 owner PID: $p"; done
+
+
+Dat kan afwijken van het proces dat met libcamerify eerst wordt getoond.
+
+#libcamerify logging wordt aangezet met:
+
+export LIBCAMERA_LOG_LEVELS=AtomispPipeline:DEBUG,CameraSensor:DEBUG,V4L2:DEBUG
+export LIBCAMERA_LOG_FILE=/tmp/libcamera-atomisp.log
+/usr/local/bin/libcamerify firefox
+# in een andere sessie:
+tail -f /tmp/libcamera-atomisp.log
+
+#procesnummertjes verschijnen links in die log

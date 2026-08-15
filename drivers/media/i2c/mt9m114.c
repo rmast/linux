@@ -1748,6 +1748,10 @@ static int mt9m114_ifp_s_stream(struct v4l2_subdev *sd, int enable)
 	struct v4l2_subdev_state *ifp_state;
 	int ret;
 
+	dev_info(&sensor->client->dev,
+		 "V4L2 S_STREAM pid=%d comm=%s enable=%d was_streaming=%d\n",
+		 current->pid, current->comm, enable, sensor->streaming);
+
 	if (!enable)
 		return mt9m114_stop_streaming(sensor);
 

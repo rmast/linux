@@ -1144,8 +1144,14 @@ int atomisp_start_streaming(struct vb2_queue *vq, unsigned int count)
 	}
 
 	/* stream on the sensor */
+	dev_info(isp->dev,
+		 "native V4L2 sensor s_stream(1) target=%s\n",
+		 isp->inputs[asd->input_curr].csi_remote_source ?
+		 isp->inputs[asd->input_curr].csi_remote_source->name : "NULL");
 	ret = v4l2_subdev_call(isp->inputs[asd->input_curr].csi_remote_source,
 			       video, s_stream, 1);
+	dev_info(isp->dev,
+		 "native V4L2 sensor s_stream(1) ret=%d\n", ret);
 	if (ret) {
 		dev_err(isp->dev, "Starting sensor stream failed: %d\n", ret);
 		atomisp_stop_stream(pipe, false, VB2_BUF_STATE_QUEUED);

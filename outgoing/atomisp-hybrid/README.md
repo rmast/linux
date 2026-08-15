@@ -85,6 +85,9 @@ cp outgoing/atomisp-hybrid/akmod/akmod-atomisp-hybrid.spec ~/rpmbuild/SPECS/
 # Gebruik expliciet de nieuwste gegenereerde dist-tarball.
 latest_tar="$(ls -1t outgoing/atomisp-hybrid/dist/atomisp-hybrid-*.tar.gz | head -n1)"
 ver="$(basename "$latest_tar" .tar.gz | sed 's/^atomisp-hybrid-//')"
+
+rm -f ~/rpmbuild/SOURCES/atomisp-hybrid-*.tar.gz;rm -f ~/rpmbuild/SOURCES/atomisp-hybrid-kmod-*.src.rpm ;rm -f ~/rpmbuild/SRPMS/* ;rm -f ~/rpmbuild/RPMS/noarch/*
+
 cp "$latest_tar" ~/rpmbuild/SOURCES/
 
 # 1) Maak eerst de kmod source RPM
@@ -109,6 +112,33 @@ sudo rm -f /var/cache/akmods/atomisp-hybrid/*.failed.log
 sudo rm -f /var/cache/akmods/atomisp-hybrid/*.rpm
 sudo akmods --force --kernels "$(uname -r)" --akmod atomisp-hybrid
 sudo depmod -a "$(uname -r)"
+
+#om de modules ook op initramfs te krijgen
+kver="$(uname -r)"
+
+sudo depmod -a "$kver"
+sudo dracut --force --kver "$kver"
+
+#Op deze manier zie je dat ze daar staan:
+
+kver="$(uname -r)"
+initrd="/boot/initramfs-${kver}.img"
+
+echo "Kernel: $kver"
+echo "Disk atomisp:"
+modinfo -F filename atomisp
+modinfo -F atomisp_hybrid_commit atomisp
+modinfo -F atomisp_hybrid_describe atomisp
+
+echo
+echo "Loaded modules:"
+lsmod | grep -E '^(atomisp|mt9m114|atomisp_gmin_platform|ipu_bridge|ipu-bridge)'
+
+echo
+echo "Initramfs contents:"
+sudo lsinitrd "$initrd" \
+  | grep -E '(^|/)(atomisp|mt9m114|ipu[-_]bridge|atomisp_gmin_platform)\.ko'
+
 
 # Verifieer metadata op de daadwerkelijk geinstalleerde modulefile.
 modfile="$(modinfo -F filename mt9m114)"

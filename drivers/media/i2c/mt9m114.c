@@ -2738,6 +2738,7 @@ static int mt9m114_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct mt9m114 *sensor;
+	unsigned int attempt;
 	int ret;
 
 	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
@@ -2792,7 +2793,16 @@ static int mt9m114_probe(struct i2c_client *client)
 	 * the sensor on manually here to reach the same state as if resumed
 	 * through runtime PM.
 	 */
-	ret = mt9m114_power_on(sensor);
+	for (attempt = 0; attempt < 3; attempt++) {
+		ret = mt9m114_power_on(sensor);
+		if (!ret || ret != -EREMOTEIO || attempt == 2)
+			break;
+
+		dev_warn(dev, "power-on failed with -EREMOTEIO, retrying (%u/2)\n",
+			 attempt + 1);
+		mt9m114_power_off(sensor);
+		msleep(20);
+	}
 	if (ret < 0) {
 		dev_err_probe(dev, ret, "Could not power on the device\n");
 		goto error_ep_free;

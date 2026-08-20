@@ -553,6 +553,11 @@ static int32_t calculate_stride(
 	words_per_line  = DIV_ROUND_UP(pixels_per_line_padded, pixels_per_word);
 	bytes_per_line  = HIVE_ISP_DDR_WORD_BYTES * words_per_line;
 
+	pr_info("ATOMISP_GEOM isys_calc_stride bpp=%d pixels=%d raw=%d align=%d padded_pixels=%d pixels_per_word=%d words=%d bytes=%d\n",
+		bits_per_pixel, pixels_per_line, raw_packed,
+		align_in_bytes, pixels_per_line_padded,
+		pixels_per_word, words_per_line, bytes_per_line);
+
 	return bytes_per_line;
 }
 
@@ -734,6 +739,16 @@ static bool calculate_ibuf_ctrl_cfg(
 	} else {
 		cfg->dest_buf_cfg.stride	= channel->ib_buffer.stride;
 	}
+
+	pr_info("ATOMISP_GEOM ibuf_cfg online=%u bpp=%d bytespp=%d left_padding_bytes=%d ib_start=%u ib_stride=%u ib_lines=%u dest_start=%u dest_stride=%u dest_lines=%u max_isp_input_width=%u input_pixels=%u align=%u raw=%u\n",
+		cfg->online, bits_per_pixel, bytes_per_pixel, left_padding,
+		cfg->ib_buffer.start_addr, cfg->ib_buffer.stride,
+		cfg->ib_buffer.lines, cfg->dest_buf_cfg.start_addr,
+		cfg->dest_buf_cfg.stride, cfg->dest_buf_cfg.lines,
+		isys_cfg->output_port_attr.max_isp_input_width,
+		isys_cfg->input_port_resolution.pixels_per_line,
+		isys_cfg->input_port_resolution.align_req_in_bytes,
+		isys_cfg->raw_packed);
 
 	/*
 	#ifndef ISP2401

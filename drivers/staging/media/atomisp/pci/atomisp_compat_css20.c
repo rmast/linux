@@ -889,6 +889,15 @@ int atomisp_q_video_buffer_to_css(struct atomisp_sub_device *asd,
 	css_buf.type = css_buf_type;
 	css_buf.data.frame = frame;
 
+	if (frame)
+		dev_info(asd->isp->dev,
+			 "ATOMISP_GEOM css_enqueue stream=%u pipe=%u type=%u vb=%u exp=%u isp_cfg=%u dynq=%d frame=%ux%u padded=%u data_bytes=%u\n",
+			 stream_id, css_pipe_id, css_buf_type,
+			 frame->vb.vb2_buf.index, frame->exp_id, frame->isp_config_id,
+			 frame->dynamic_queue_id,
+			 frame->frame_info.res.width, frame->frame_info.res.height,
+			 frame->frame_info.padded_width, frame->data_bytes);
+
 	err = ia_css_pipe_enqueue_buffer(
 		  stream_env->pipes[css_pipe_id], &css_buf);
 	if (err)
@@ -1086,6 +1095,20 @@ int atomisp_css_dequeue_buffer(struct atomisp_sub_device *asd,
 			"ia_css_pipe_dequeue_buffer failed: 0x%x\n", err);
 		return -EINVAL;
 	}
+
+	if (buf_type == IA_CSS_BUFFER_TYPE_OUTPUT_FRAME &&
+	    isp_css_buffer->css_buffer.data.frame)
+		dev_info(isp->dev,
+			 "ATOMISP_GEOM css_dequeue stream=%u pipe=%u type=%u vb=%u exp=%u isp_cfg=%u dynq=%d frame=%ux%u padded=%u data_bytes=%u\n",
+			 stream_id, pipe_id, buf_type,
+			 isp_css_buffer->css_buffer.data.frame->vb.vb2_buf.index,
+			 isp_css_buffer->css_buffer.data.frame->exp_id,
+			 isp_css_buffer->css_buffer.data.frame->isp_config_id,
+			 isp_css_buffer->css_buffer.data.frame->dynamic_queue_id,
+			 isp_css_buffer->css_buffer.data.frame->frame_info.res.width,
+			 isp_css_buffer->css_buffer.data.frame->frame_info.res.height,
+			 isp_css_buffer->css_buffer.data.frame->frame_info.padded_width,
+			 isp_css_buffer->css_buffer.data.frame->data_bytes);
 
 	return 0;
 }
@@ -1897,6 +1920,17 @@ static void __configure_output(struct atomisp_sub_device *asd,
 	stream_env->pipe_configs[pipe_id].output_info[0].res.height = height;
 	stream_env->pipe_configs[pipe_id].output_info[0].format = format;
 	stream_env->pipe_configs[pipe_id].output_info[0].padded_width = min_width;
+
+	dev_info(isp->dev,
+		 "ATOMISP_GEOM configure_output stream=%u pipe=%u mode=%u out=%ux%u padded=%u fmt=%u effective=%ux%u left_padding=%d dvs=%ux%u frame_delay=%u\n",
+		 stream_index, pipe_id, stream_env->pipe_configs[pipe_id].mode,
+		 width, height, min_width, format,
+		 s_config->input_config.effective_res.width,
+		 s_config->input_config.effective_res.height,
+		 s_config->left_padding,
+		 stream_env->pipe_configs[pipe_id].dvs_envelope.width,
+		 stream_env->pipe_configs[pipe_id].dvs_envelope.height,
+		 stream_env->pipe_configs[pipe_id].dvs_frame_delay);
 
 	/* isp binary 2.2 specific setting*/
 	if (width > s_config->input_config.effective_res.width ||

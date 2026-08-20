@@ -2927,6 +2927,11 @@ ia_css_get_crop_offsets(
 	in_frame->crop_info.start_column = column;
 	in_frame->crop_info.start_line = row;
 
+	pr_info("ATOMISP_GEOM crop_offsets input=%ux%u effective=%ux%u extra_row=%u extra_col=%u start_col=%u start_row=%u\n",
+		input_res->width, input_res->height,
+		effective_res->width, effective_res->height,
+		extra_row, extra_col, column, row);
+
 	IA_CSS_LEAVE_PRIVATE("void start_col: %u start_row: %u", column, row);
 
 	return;

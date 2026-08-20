@@ -158,6 +158,22 @@ int ia_css_ifmtr_configure(struct ia_css_stream_config *config,
 		   otherwise vectors per line * buffer_height. */
 	}
 
+	pr_info("ATOMISP_GEOM ifmtr_pre idx=%u mode=%u input_format=%u cropped=%ux%u buffer_width=%u left_padding=%u start=%u,%u num_vectors=%u two_ppc=%u binary_left=%u bin_in=%ux%u bin_in_padded=%u bin_out0=%ux%u bin_out0_padded=%u dvs=%ux%u top_crop=%u left_crop=%u\n",
+		if_config_index, config->mode, input_format,
+		cropped_width, cropped_height, buffer_width, left_padding,
+		start_column, start_line, num_vectors, two_ppc,
+		binary ? binary->left_padding : 0,
+		binary ? binary->in_frame_info.res.width : 0,
+		binary ? binary->in_frame_info.res.height : 0,
+		binary ? binary->in_frame_info.padded_width : 0,
+		binary ? binary->out_frame_info[0].res.width : 0,
+		binary ? binary->out_frame_info[0].res.height : 0,
+		binary ? binary->out_frame_info[0].padded_width : 0,
+		binary ? binary->dvs_envelope.width : 0,
+		binary ? binary->dvs_envelope.height : 0,
+		binary ? binary->info->sp.pipeline.top_cropping : 0,
+		binary ? binary->info->sp.pipeline.left_cropping : 0);
+
 	start_column_b = start_column;
 
 	bits_per_pixel = input_formatter_get_alignment(INPUT_FORMATTER0_ID)

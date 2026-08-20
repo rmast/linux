@@ -1276,6 +1276,10 @@ sh_css_sp_init_pipeline(struct ia_css_pipeline *me,
 						   &sh_css_sp_group.pipe[thread_id].output_frame_queue_id));
 	}
 
+	pr_info("ATOMISP_GEOM pipe_queue pipe_id=%d thread_id=%u output_frame_queue_id=%u inout_port_config=%08x\n",
+		pipe_id, thread_id, sh_css_sp_group.pipe[thread_id].output_frame_queue_id,
+		me->inout_port_config);
+
 	IA_CSS_LOG("pipe_id %d port_config %08x",
 		   pipe_id, sh_css_sp_group.pipe[thread_id].inout_port_config);
 

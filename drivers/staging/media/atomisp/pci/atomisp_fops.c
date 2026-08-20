@@ -247,6 +247,17 @@ static int atomisp_q_video_buffers_to_css(struct atomisp_sub_device *asd,
 		if (!frame)
 			return -EINVAL;
 
+		dev_info(asd->isp->dev,
+			 "ATOMISP_GEOM q_to_css stream=%u pipe=%u type=%u vb=%u exp=%u isp_cfg=%u dynq=%d frame=%ux%u padded=%u data_bytes=%u pix=%ux%u bpl=%u size=%u in_css_before=%d space_left=%d\n",
+			 stream_id, css_pipe_id, css_buf_type,
+			 frame->vb.vb2_buf.index, frame->exp_id, frame->isp_config_id,
+			 frame->dynamic_queue_id,
+			 frame->frame_info.res.width, frame->frame_info.res.height,
+			 frame->frame_info.padded_width, frame->data_bytes,
+			 pipe->pix.width, pipe->pix.height,
+			 pipe->pix.bytesperline, pipe->pix.sizeimage,
+			 atomisp_buffers_in_css(pipe), space);
+
 		/*
 		 * If there is a per_frame setting to apply on the buffer,
 		 * do it before buffer en-queueing.
@@ -393,6 +404,17 @@ static void atomisp_buf_queue(struct vb2_buffer *vb)
 		list_add_tail(&frame->queue, &pipe->buffers_waiting_for_param);
 	else
 		list_add_tail(&frame->queue, &pipe->activeq);
+
+	dev_info(asd->isp->dev,
+		 "ATOMISP_GEOM vb2_queue vb=%u exp=%u isp_cfg=%u dynq=%d frame=%ux%u padded=%u data_bytes=%u pix=%ux%u bpl=%u size=%u waiting=%d active_empty=%d streaming=%d\n",
+		 vb->index, frame->exp_id, frame->isp_config_id,
+		 frame->dynamic_queue_id,
+		 frame->frame_info.res.width, frame->frame_info.res.height,
+		 frame->frame_info.padded_width, frame->data_bytes,
+		 pipe->pix.width, pipe->pix.height,
+		 pipe->pix.bytesperline, pipe->pix.sizeimage,
+		 !!pipe->frame_request_config_id[vb->index],
+		 list_empty(&pipe->activeq), asd->streaming);
 
 	spin_unlock_irqrestore(&pipe->irq_lock, irqflags);
 

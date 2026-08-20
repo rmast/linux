@@ -749,6 +749,21 @@ ia_css_binary_fill_info(const struct ia_css_binary_xinfo *xinfo,
 	}
 	binary->in_frame_info.raw_bit_depth = bits_per_pixel;
 
+	pr_info("ATOMISP_GEOM binary_info mode=%u online=%u stream_format=%u two_ppc=%u in=%ux%u in_padded=%u internal=%ux%u internal_padded=%u dvs=%ux%u left_padding=%u top_crop=%u left_crop=%u stream_left_padding=%d need_scaling=%u\n",
+		info->pipeline.mode, online, stream_format, two_ppc,
+		binary->in_frame_info.res.width,
+		binary->in_frame_info.res.height,
+		binary->in_frame_info.padded_width,
+		binary->internal_frame_info.res.width,
+		binary->internal_frame_info.res.height,
+		binary->internal_frame_info.padded_width,
+		binary->dvs_envelope.width, binary->dvs_envelope.height,
+		binary->left_padding,
+		info->pipeline.top_cropping,
+		info->pipeline.left_cropping,
+		stream_config_left_padding,
+		need_scaling);
+
 	for (i = 0; i < IA_CSS_BINARY_MAX_OUTPUT_PORTS; i++)
 	{
 		if (out_info[i]) {
@@ -766,6 +781,12 @@ ia_css_binary_fill_info(const struct ia_css_binary_xinfo *xinfo,
 				binary->out_frame_info[i].raw_bit_depth = 16;
 			}
 			binary->out_frame_info[i].format        = out_info[i]->format;
+			pr_info("ATOMISP_GEOM binary_out idx=%u out=%ux%u padded=%u fmt=%u raw_depth=%u\n",
+				i, binary->out_frame_info[i].res.width,
+				binary->out_frame_info[i].res.height,
+				binary->out_frame_info[i].padded_width,
+				binary->out_frame_info[i].format,
+				binary->out_frame_info[i].raw_bit_depth);
 		}
 	}
 

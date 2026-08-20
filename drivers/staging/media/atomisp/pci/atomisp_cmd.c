@@ -645,6 +645,15 @@ void atomisp_buffer_done(struct ia_css_frame *frame, enum vb2_buffer_state state
 	frame->vb.vb2_buf.timestamp = ktime_get_ns();
 	frame->vb.field = pipe->pix.field;
 	frame->vb.sequence = atomic_read(&pipe->asd->sequence);
+	dev_info(pipe->isp->dev,
+		 "ATOMISP_GEOM vb2_done vb=%u state=%u seq=%u exp=%u isp_cfg=%u dynq=%d frame=%ux%u padded=%u data_bytes=%u pix=%ux%u bpl=%u size=%u payload=%u\n",
+		 frame->vb.vb2_buf.index, state, frame->vb.sequence,
+		 frame->exp_id, frame->isp_config_id, frame->dynamic_queue_id,
+		 frame->frame_info.res.width, frame->frame_info.res.height,
+		 frame->frame_info.padded_width, frame->data_bytes,
+		 pipe->pix.width, pipe->pix.height,
+		 pipe->pix.bytesperline, pipe->pix.sizeimage,
+		 state == VB2_BUF_STATE_DONE ? pipe->pix.sizeimage : 0);
 	list_del(&frame->queue);
 	if (state == VB2_BUF_STATE_DONE)
 		vb2_set_plane_payload(&frame->vb.vb2_buf, 0, pipe->pix.sizeimage);
@@ -851,6 +860,15 @@ void atomisp_buf_done(struct atomisp_sub_device *asd, int error,
 
 		dev_dbg(isp->dev, "%s: main frame with exp_id %d is ready\n",
 			__func__, frame->exp_id);
+		dev_info(isp->dev,
+			 "ATOMISP_GEOM css_done stream=%u pipe=%u type=%u error=%d vb=%u exp=%u isp_cfg=%u dynq=%d valid=%d frame=%ux%u padded=%u data_bytes=%u pix=%ux%u bpl=%u size=%u\n",
+			 stream_id, css_pipe_id, buf_type, error,
+			 frame->vb.vb2_buf.index, frame->exp_id, frame->isp_config_id,
+			 frame->dynamic_queue_id, frame->valid,
+			 frame->frame_info.res.width, frame->frame_info.res.height,
+			 frame->frame_info.padded_width, frame->data_bytes,
+			 pipe->pix.width, pipe->pix.height,
+			 pipe->pix.bytesperline, pipe->pix.sizeimage);
 
 		i = frame->vb.vb2_buf.index;
 

@@ -17,7 +17,6 @@
 #include "atomisp_common.h"
 #include "atomisp_fops.h"
 #include "atomisp_internal.h"
-#include "atomisp_ioctl.h"
 #include "atomisp_compat.h"
 #include "atomisp_subdev.h"
 #include "atomisp_v4l2.h"

@@ -24,6 +24,19 @@
 struct atomisp_device;
 struct ia_css_frame;
 
+extern const struct v4l2_ioctl_ops atomisp_ioctl_ops;
+
+extern const struct atomisp_format_bridge atomisp_output_fmts[];
+extern const size_t atomisp_output_fmts_size;
+
+const struct atomisp_format_bridge *atomisp_get_format_bridge(unsigned int pixelformat);
+const struct atomisp_format_bridge *atomisp_get_format_bridge_from_mbus(u32 mbus_code);
+
+int atomisp_pipe_check(struct atomisp_video_pipe *pipe, bool streaming_ok);
+int atomisp_alloc_css_stat_bufs(struct atomisp_sub_device *asd, uint16_t stream_id);
+int atomisp_start_streaming(struct vb2_queue *vq, unsigned int count);
+void atomisp_stop_streaming(struct vb2_queue *vq);
+
 #define MSI_ENABLE_BIT		16
 #define INTR_DISABLE_BIT	10
 #define BUS_MASTER_ENABLE	2

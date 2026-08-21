@@ -20,7 +20,6 @@
 #include "atomisp_compat.h"
 #include "atomisp_fops.h"
 #include "atomisp_internal.h"
-#include "atomisp_ioctl.h"
 
 const struct atomisp_in_fmt_conv atomisp_in_fmt_conv[] = {
 	{ MEDIA_BUS_FMT_SBGGR8_1X8, 8, 8, ATOMISP_INPUT_FORMAT_RAW_8, IA_CSS_BAYER_ORDER_BGGR },

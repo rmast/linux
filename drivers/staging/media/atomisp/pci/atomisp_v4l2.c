@@ -25,7 +25,6 @@
 #include "atomisp_cmd.h"
 #include "atomisp_common.h"
 #include "atomisp_fops.h"
-#include "atomisp_ioctl.h"
 #include "atomisp_internal.h"
 #include "atomisp-regs.h"
 #include "atomisp_dfs_tables.h"

@@ -17,7 +17,6 @@
 #include "atomisp_common.h"
 #include "atomisp_fops.h"
 #include "atomisp_internal.h"
-#include "atomisp_ioctl.h"
 #include "atomisp-regs.h"
 #include "atomisp_compat.h"
 
@@ -614,10 +613,6 @@ static int atomisp_enum_framesizes(struct file *file, void *priv,
 		return atomisp_enum_framesizes_crop(isp, fsize);
 
 	if (input->sensor_isp) {
-		/*
-		 * Query the IFP source pad with its native mbus code; a
-		 * capture-format code is not meaningful to the IFP here.
-		 */
 		fse.pad = SENSOR_ISP_PAD_SOURCE;
 		fse.code = atomisp_get_enum_mbus_code(input);
 		act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor_isp);
@@ -626,7 +621,7 @@ static int atomisp_enum_framesizes(struct file *file, void *priv,
 	} else {
 		act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor);
 		ret = v4l2_subdev_call(input->sensor, pad, enum_frame_size,
-			       act_sd_state, &fse);
+				       act_sd_state, &fse);
 	}
 	if (act_sd_state)
 		v4l2_subdev_unlock_state(act_sd_state);
@@ -667,10 +662,6 @@ static int atomisp_enum_frameintervals(struct file *file, void *priv,
 	fie.code = format->mbus_code;
 
 	if (input->sensor_isp) {
-		/*
-		 * Query the IFP source pad with its actual mbus code; the
-		 * capture pixel format code is not a valid IFP source code.
-		 */
 		fie.pad = SENSOR_ISP_PAD_SOURCE;
 		fie.code = atomisp_get_enum_mbus_code(input);
 		act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor_isp);
@@ -679,7 +670,7 @@ static int atomisp_enum_frameintervals(struct file *file, void *priv,
 	} else {
 		act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor);
 		ret = v4l2_subdev_call(input->sensor, pad, enum_frame_interval,
-			       act_sd_state, &fie);
+				       act_sd_state, &fie);
 	}
 	if (act_sd_state)
 		v4l2_subdev_unlock_state(act_sd_state);
@@ -714,11 +705,6 @@ static int atomisp_enum_fmt_cap(struct file *file, void *fh,
 
 	if (input->sensor_isp) {
 		sensor_mbus_code = atomisp_get_enum_mbus_code(input);
-		/*
-		 * The embedded ISP source pad defaults to RAW10, but the video
-		 * node should enumerate the capture formats exposed by the IFP,
-		 * not collapse to that internal source code.
-		 */
 		filter_by_mbus_code = !f->mbus_code;
 	} else {
 		act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor);
@@ -737,10 +723,6 @@ static int atomisp_enum_fmt_cap(struct file *file, void *fh,
 		if (act_sd_state)
 			v4l2_subdev_unlock_state(act_sd_state);
 
-		/*
-		 * Compatibility for old sensors which do not implement enum_mbus_code.
-		 * Keep the historical non-filtered behavior for these.
-		 */
 		if (ret && ret != -ENOIOCTLCMD)
 			return ret;
 	}
@@ -753,28 +735,12 @@ static int atomisp_enum_fmt_cap(struct file *file, void *fh,
 
 	for (i = 0; i < ARRAY_SIZE(atomisp_output_fmts); i++) {
 		format = &atomisp_output_fmts[i];
-
-		/*
-		 * Is the atomisp-supported format is valid for the
-		 * sensor (configuration)? If not, skip it.
-		 *
-		 * FIXME: fix the pipeline to allow sensor format too.
-		 */
 		if (format->sh_fmt == IA_CSS_FRAME_FORMAT_RAW)
 			continue;
-
-		/*
-		 * Keep RGB565 hidden until channel-ordering is validated for this
-		 * capture path. Advertising a broken format is worse than not
-		 * exposing it.
-		 */
 		if (format->pixelformat == V4L2_PIX_FMT_RGB565)
 			continue;
-
 		if (f->mbus_code && format->mbus_code != f->mbus_code)
 			continue;
-
-		/* Found a match. Now let's pick f->index'th one. */
 		if (fi < f->index) {
 			fi++;
 			continue;
@@ -1520,202 +1486,6 @@ static int atomisp_s_parm(struct file *file, void *fh,
 	rval = v4l2_ctrl_s_ctrl(asd->run_mode, mode);
 
 	return rval == -ENOIOCTLCMD ? 0 : rval;
-}
-
-static long __maybe_unused atomisp_vidioc_default(struct file *file, void *fh,
-					  bool valid_prio, unsigned int cmd, void *arg)
-{
-	struct video_device *vdev = video_devdata(file);
-	struct atomisp_sub_device *asd = atomisp_to_video_pipe(vdev)->asd;
-	int err;
-
-	switch (cmd) {
-	case ATOMISP_IOC_G_XNR:
-		err = atomisp_xnr(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_XNR:
-		err = atomisp_xnr(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_G_NR:
-		err = atomisp_nr(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_NR:
-		err = atomisp_nr(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_G_TNR:
-		err = atomisp_tnr(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_TNR:
-		err = atomisp_tnr(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_G_BLACK_LEVEL_COMP:
-		err = atomisp_black_level(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_BLACK_LEVEL_COMP:
-		err = atomisp_black_level(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_G_EE:
-		err = atomisp_ee(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_EE:
-		err = atomisp_ee(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_G_DIS_STAT:
-		err = atomisp_get_dis_stat(asd, arg);
-		break;
-
-	case ATOMISP_IOC_G_DVS2_BQ_RESOLUTIONS:
-		err = atomisp_get_dvs2_bq_resolutions(asd, arg);
-		break;
-
-	case ATOMISP_IOC_S_DIS_COEFS:
-		err = atomisp_css_cp_dvs2_coefs(asd, arg,
-						&asd->params.css_param, true);
-		if (!err && arg)
-			asd->params.css_update_params_needed = true;
-		break;
-
-	case ATOMISP_IOC_S_DIS_VECTOR:
-		err = atomisp_cp_dvs_6axis_config(asd, arg,
-						  &asd->params.css_param, true);
-		if (!err && arg)
-			asd->params.css_update_params_needed = true;
-		break;
-
-	case ATOMISP_IOC_G_ISP_PARM:
-		err = atomisp_param(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_ISP_PARM:
-		err = atomisp_param(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_G_3A_STAT:
-		err = atomisp_3a_stat(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_G_ISP_GAMMA:
-		err = atomisp_gamma(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_ISP_GAMMA:
-		err = atomisp_gamma(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_G_ISP_GDC_TAB:
-		err = atomisp_gdc_cac_table(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_ISP_GDC_TAB:
-		err = atomisp_gdc_cac_table(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_G_ISP_MACC:
-		err = atomisp_macc_table(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_ISP_MACC:
-		err = atomisp_macc_table(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_G_ISP_BAD_PIXEL_DETECTION:
-		err = atomisp_bad_pixel_param(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_ISP_BAD_PIXEL_DETECTION:
-		err = atomisp_bad_pixel_param(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_G_ISP_FALSE_COLOR_CORRECTION:
-		err = atomisp_false_color_param(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_ISP_FALSE_COLOR_CORRECTION:
-		err = atomisp_false_color_param(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_G_ISP_CTC:
-		err = atomisp_ctc(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_ISP_CTC:
-		err = atomisp_ctc(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_G_ISP_WHITE_BALANCE:
-		err = atomisp_white_balance_param(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_ISP_WHITE_BALANCE:
-		err = atomisp_white_balance_param(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_G_3A_CONFIG:
-		err = atomisp_3a_config_param(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_3A_CONFIG:
-		err = atomisp_3a_config_param(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_S_ISP_FPN_TABLE:
-		err = atomisp_fixed_pattern_table(asd, arg);
-		break;
-
-	case ATOMISP_IOC_S_ISP_SHD_TAB:
-		err = atomisp_set_shading_table(asd, arg);
-		break;
-
-	case ATOMISP_IOC_G_ISP_GAMMA_CORRECTION:
-		err = atomisp_gamma_correction(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_ISP_GAMMA_CORRECTION:
-		err = atomisp_gamma_correction(asd, 1, arg);
-		break;
-
-	case ATOMISP_IOC_S_PARAMETERS:
-		err = atomisp_set_parameters(vdev, arg);
-		break;
-
-	case ATOMISP_IOC_EXP_ID_UNLOCK:
-		err = atomisp_exp_id_unlock(asd, arg);
-		break;
-	case ATOMISP_IOC_EXP_ID_CAPTURE:
-		err = atomisp_exp_id_capture(asd, arg);
-		break;
-	case ATOMISP_IOC_S_ENABLE_DZ_CAPT_PIPE:
-		err = atomisp_enable_dz_capt_pipe(asd, arg);
-		break;
-	case ATOMISP_IOC_G_FORMATS_CONFIG:
-		err = atomisp_formats(asd, 0, arg);
-		break;
-
-	case ATOMISP_IOC_S_FORMATS_CONFIG:
-		err = atomisp_formats(asd, 1, arg);
-		break;
-	case ATOMISP_IOC_INJECT_A_FAKE_EVENT:
-		err = atomisp_inject_a_fake_event(asd, arg);
-		break;
-	case ATOMISP_IOC_S_ARRAY_RESOLUTION:
-		err = atomisp_set_array_res(asd, arg);
-		break;
-	default:
-		err = -EINVAL;
-		break;
-	}
-
-	return err;
 }
 
 const struct v4l2_ioctl_ops atomisp_ioctl_ops = {

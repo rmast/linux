@@ -18,7 +18,6 @@
 #include "atomisp_cmd.h"
 #include "atomisp-regs.h"
 #include "atomisp_fops.h"
-#include "atomisp_ioctl.h"
 
 #include "ia_css_debug.h"
 #include "ia_css_isp_param.h"

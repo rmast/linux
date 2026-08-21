@@ -104,34 +104,6 @@ struct intel_v4l2_subdev_table {
 	struct v4l2_subdev *subdev;
 };
 
-/*
- *  Sensor of external ISP can send multiple streams with different mipi data
- * type in the same virtual channel. This information needs to come from the
- * sensor or external ISP
- */
-struct atomisp_isys_config_info {
-	u8 input_format;
-	u16 width;
-	u16 height;
-};
-
-struct atomisp_input_stream_info {
-	enum atomisp_input_stream_id stream;
-	u8 enable;
-	/* Sensor driver fills ch_id with the id
-	   of the virtual channel. */
-	u8 ch_id;
-	/* Tells how many streams in this virtual channel. If 0 ignore rest
-	 * and the input format will be from mipi_info */
-	u8 isys_configs;
-	/*
-	 * if more isys_configs is more than 0, sensor needs to configure the
-	 * input format differently. width and height can be 0. If width and
-	 * height is not zero, then the corresponding data needs to be set
-	 */
-	struct atomisp_isys_config_info isys_info[MAX_STREAMS_PER_CHANNEL];
-};
-
 struct camera_sensor_platform_data {
 	int (*flisclk_ctrl)(struct v4l2_subdev *subdev, int flag);
 	int (*csi_cfg)(struct v4l2_subdev *subdev, int flag);

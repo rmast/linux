@@ -288,7 +288,6 @@ static int atomisp_enum_input(struct file *file, void *fh,
 
 	input->type = V4L2_INPUT_TYPE_CAMERA;
 	input->index = index;
-	input->reserved[1] = isp->inputs[index].port;
 
 	return 0;
 }

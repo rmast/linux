@@ -2455,40 +2455,6 @@ void atomisp_handle_parameter_and_buffer(struct atomisp_video_pipe *pipe)
 	atomisp_qbuffers_to_css(asd);
 }
 
-static void __atomisp_update_stream_env(struct atomisp_sub_device *asd,
-					u16 stream_index, struct atomisp_input_stream_info *stream_info)
-{
-	int i;
-
-	/* assign virtual channel id return from sensor driver query */
-	asd->stream_env[stream_index].ch_id = stream_info->ch_id;
-	asd->stream_env[stream_index].isys_configs = stream_info->isys_configs;
-	for (i = 0; i < stream_info->isys_configs; i++) {
-		asd->stream_env[stream_index].isys_info[i].input_format =
-		    stream_info->isys_info[i].input_format;
-		asd->stream_env[stream_index].isys_info[i].width =
-		    stream_info->isys_info[i].width;
-		asd->stream_env[stream_index].isys_info[i].height =
-		    stream_info->isys_info[i].height;
-	}
-}
-
-static void __atomisp_init_stream_info(u16 stream_index,
-				       struct atomisp_input_stream_info *stream_info)
-{
-	int i;
-
-	stream_info->enable = 1;
-	stream_info->stream = stream_index;
-	stream_info->ch_id = 0;
-	stream_info->isys_configs = 0;
-	for (i = 0; i < MAX_STREAMS_PER_CHANNEL; i++) {
-		stream_info->isys_info[i].input_format = 0;
-		stream_info->isys_info[i].width = 0;
-		stream_info->isys_info[i].height = 0;
-	}
-}
-
 static void atomisp_fill_pix_format(struct v4l2_pix_format *f,
 				    u32 width, u32 height,
 				    const struct atomisp_format_bridge *br_fmt)
@@ -3300,8 +3266,6 @@ static int atomisp_set_fmt_to_snr(struct video_device *vdev, const struct v4l2_p
 	struct atomisp_device *isp = asd->isp;
 	const struct atomisp_format_bridge *format;
 	struct v4l2_mbus_framefmt req_ffmt, ffmt = { };
-	struct atomisp_input_stream_info *stream_info =
-	    (struct atomisp_input_stream_info *)&ffmt.reserved;
 	int ret;
 
 	format = atomisp_get_format_bridge(f->pixelformat);
@@ -3315,8 +3279,6 @@ static int atomisp_set_fmt_to_snr(struct video_device *vdev, const struct v4l2_p
 	dev_dbg(isp->dev, "s_mbus_fmt: ask %ux%u (padding %ux%u, dvs %ux%u)\n",
 		ffmt.width, ffmt.height, asd->sink_pad_padding_w, asd->sink_pad_padding_h,
 		dvs_env_w, dvs_env_h);
-
-	__atomisp_init_stream_info(ATOMISP_INPUT_STREAM_GENERAL, stream_info);
 
 	req_ffmt = ffmt;
 
@@ -3343,8 +3305,6 @@ static int atomisp_set_fmt_to_snr(struct video_device *vdev, const struct v4l2_p
 	ret = atomisp_set_sensor_crop_and_fmt(isp, &ffmt, V4L2_SUBDEV_FORMAT_ACTIVE);
 	if (ret)
 		return ret;
-
-	__atomisp_update_stream_env(asd, ATOMISP_INPUT_STREAM_GENERAL, stream_info);
 
 	dev_dbg(isp->dev, "sensor width: %d, height: %d\n",
 		ffmt.width, ffmt.height);

@@ -71,17 +71,6 @@ bool atomisp_is_viewfinder_support(struct atomisp_device *isp);
 
 /* ISP features control function */
 
-/*
- * Function to enable/disable lens geometry distortion correction (GDC) and
- * chromatic aberration correction (CAC)
- */
-int atomisp_gdc_cac(struct atomisp_sub_device *asd, int flag,
-		    __s32 *value);
-
-/* Function to enable/disable low light mode (including ANR) */
-int atomisp_low_light(struct atomisp_sub_device *asd, int flag,
-		      __s32 *value);
-
 /* Function to set the DIS coefficients. */
 int atomisp_set_dis_coefs(struct atomisp_sub_device *asd,
 			  struct atomisp_dis_coefficients *coefs);
@@ -89,30 +78,6 @@ int atomisp_set_dis_coefs(struct atomisp_sub_device *asd,
 /* Function to set the DIS motion vector. */
 int atomisp_set_dis_vector(struct atomisp_sub_device *asd,
 			   struct atomisp_dis_vector *vector);
-
-/* Function to configure color effect of the image */
-int atomisp_color_effect(struct atomisp_sub_device *asd, int flag,
-			 __s32 *effect);
-
-/* Function to configure bad pixel correction */
-int atomisp_bad_pixel(struct atomisp_sub_device *asd, int flag,
-		      __s32 *value);
-
-/* Function to enable/disable video image stablization */
-int atomisp_video_stable(struct atomisp_sub_device *asd, int flag,
-			 __s32 *value);
-
-/* Function to configure fixed pattern noise */
-int atomisp_fixed_pattern(struct atomisp_sub_device *asd, int flag,
-			  __s32 *value);
-
-/* Function to configure false color correction */
-int atomisp_false_color(struct atomisp_sub_device *asd, int flag,
-			__s32 *value);
-
-/* Function to setup digital zoom */
-int atomisp_digital_zoom(struct atomisp_sub_device *asd, int flag,
-			 __s32 *value);
 
 /* Function to calculate real zoom region for every pipe */
 int atomisp_calculate_real_zoom_region(struct atomisp_sub_device *asd,

@@ -35,42 +35,6 @@ static const char *CARD = "ATOM ISP";	/* max size 31 */
  */
 static struct v4l2_query_ext_ctrl ci_v4l2_controls[] = {
 	{
-		.id = V4L2_CID_AUTO_WHITE_BALANCE,
-		.type = V4L2_CTRL_TYPE_BOOLEAN,
-		.name = "Automatic White Balance",
-		.minimum = 0,
-		.maximum = 1,
-		.step = 1,
-		.default_value = 0,
-	},
-	{
-		.id = V4L2_CID_RED_BALANCE,
-		.type = V4L2_CTRL_TYPE_INTEGER,
-		.name = "Red Balance",
-		.minimum = 0x00,
-		.maximum = 0xff,
-		.step = 1,
-		.default_value = 0x00,
-	},
-	{
-		.id = V4L2_CID_BLUE_BALANCE,
-		.type = V4L2_CTRL_TYPE_INTEGER,
-		.name = "Blue Balance",
-		.minimum = 0x00,
-		.maximum = 0xff,
-		.step = 1,
-		.default_value = 0x00,
-	},
-	{
-		.id = V4L2_CID_GAMMA,
-		.type = V4L2_CTRL_TYPE_INTEGER,
-		.name = "Gamma",
-		.minimum = 0x00,
-		.maximum = 0xff,
-		.step = 1,
-		.default_value = 0x00,
-	},
-	{
 		.id = V4L2_CID_COLORFX,
 		.type = V4L2_CTRL_TYPE_INTEGER,
 		.name = "Image Color Effect",

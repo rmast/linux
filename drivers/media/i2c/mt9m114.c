@@ -2800,7 +2800,7 @@ static int mt9m114_probe(struct i2c_client *client)
 
 		dev_warn(dev, "power-on failed with -EREMOTEIO, retrying (%u/2)\n",
 			 attempt + 1);
-		mt9m114_power_off(sensor);
+		/* mt9m114_power_on() already rolled back clock/regulators on error. */
 		msleep(20);
 	}
 	if (ret < 0) {

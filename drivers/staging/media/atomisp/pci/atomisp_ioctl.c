@@ -1522,8 +1522,8 @@ static int atomisp_s_parm(struct file *file, void *fh,
 	return rval == -ENOIOCTLCMD ? 0 : rval;
 }
 
-static long atomisp_vidioc_default(struct file *file, void *fh,
-				   bool valid_prio, unsigned int cmd, void *arg)
+static long __maybe_unused atomisp_vidioc_default(struct file *file, void *fh,
+					  bool valid_prio, unsigned int cmd, void *arg)
 {
 	struct video_device *vdev = video_devdata(file);
 	struct atomisp_sub_device *asd = atomisp_to_video_pipe(vdev)->asd;
@@ -1739,7 +1739,6 @@ const struct v4l2_ioctl_ops atomisp_ioctl_ops = {
 	.vidioc_expbuf = vb2_ioctl_expbuf,
 	.vidioc_streamon = vb2_ioctl_streamon,
 	.vidioc_streamoff = vb2_ioctl_streamoff,
-	.vidioc_default = atomisp_vidioc_default,
 	.vidioc_s_parm = atomisp_s_parm,
 	.vidioc_g_parm = atomisp_g_parm,
 };

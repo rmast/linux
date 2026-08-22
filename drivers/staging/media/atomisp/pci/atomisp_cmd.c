@@ -2658,6 +2658,9 @@ static int atomisp_set_sensor_crop_and_fmt(struct atomisp_device *isp,
 	struct v4l2_rect try_saved_crop;
 	bool restore_try_state = false;
 	struct v4l2_subdev_state *sd_state;
+	/* Original request, used below to ask the sensor ISP scaler for this exact size. */
+	unsigned int requested_width = ffmt->width;
+	unsigned int requested_height = ffmt->height;
 	int ret = 0;
 
 	if (!input->sensor)
@@ -2746,6 +2749,30 @@ set_fmt:
 		ret = v4l2_subdev_call(input->sensor_isp, pad, set_fmt, sd_state, &format);
 		dev_dbg(isp->dev, "Set sensor ISP sink format ret: %d size %dx%d\n",
 			ret, format.format.width, format.format.height);
+
+		/*
+		 * Ask the sensor ISP's scaler (e.g. the mt9m114 IFP) to downscale to the
+		 * originally requested size instead of always passing through its full
+		 * sink crop. Sensors without scaler-on-sink support (or that can only
+		 * bypass it, like RAW10 passthrough) will reject or clamp this; that is
+		 * not fatal, it just means no downscale happens for this format/sensor.
+		 */
+		if (ret == 0 && (requested_width < format.format.width ||
+				 requested_height < format.format.height)) {
+			struct v4l2_subdev_selection compose_sel = {
+				.which = which,
+				.pad = SENSOR_ISP_PAD_SINK,
+				.target = V4L2_SEL_TGT_COMPOSE,
+				.r.width = requested_width,
+				.r.height = requested_height,
+			};
+			int compose_ret;
+
+			compose_ret = v4l2_subdev_call(input->sensor_isp, pad, set_selection,
+						       sd_state, &compose_sel);
+			dev_dbg(isp->dev, "Set sensor ISP compose ret: %d size %dx%d\n",
+				compose_ret, compose_sel.r.width, compose_sel.r.height);
+		}
 
 		if (ret == 0) {
 			format.pad = SENSOR_ISP_PAD_SOURCE;

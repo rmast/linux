@@ -2877,6 +2877,9 @@ int atomisp_try_fmt(struct atomisp_device *isp, struct v4l2_pix_format *f,
 
 	dev_dbg(isp->dev, "try_mbus_fmt: try %ux%u\n", ffmt.width, ffmt.height);
 
+	{
+	unsigned int req_width = f->width, req_height = f->height;
+
 	ret = atomisp_set_sensor_crop_and_fmt(isp, &ffmt, V4L2_SUBDEV_FORMAT_TRY,
 					      f->width, f->height);
 	if (ret)
@@ -2894,10 +2897,19 @@ int atomisp_try_fmt(struct atomisp_device *isp, struct v4l2_pix_format *f,
 	/*
 	 * Recalculate padding for the sensor-selected size to keep TRY probing
 	 * deterministic across repeated calls with the same user request.
+	 * If the sensor ISP's scaler already delivered exactly the requested
+	 * size (e.g. via the compose path in atomisp_set_sensor_crop_and_fmt()),
+	 * there is no padding left to strip back off.
 	 */
-	atomisp_get_padding(isp, ffmt.width, ffmt.height, &padding_w, &padding_h);
-	f->width = ffmt.width > padding_w ? ffmt.width - padding_w : ffmt.width;
-	f->height = ffmt.height > padding_h ? ffmt.height - padding_h : ffmt.height;
+	if (ffmt.width == req_width && ffmt.height == req_height) {
+		f->width = ffmt.width;
+		f->height = ffmt.height;
+	} else {
+		atomisp_get_padding(isp, ffmt.width, ffmt.height, &padding_w, &padding_h);
+		f->width = ffmt.width > padding_w ? ffmt.width - padding_w : ffmt.width;
+		f->height = ffmt.height > padding_h ? ffmt.height - padding_h : ffmt.height;
+	}
+	}
 
 	/*
 	 * If the format is jpeg or custom RAW, then the width and height will

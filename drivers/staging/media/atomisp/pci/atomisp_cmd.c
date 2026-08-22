@@ -2799,11 +2799,15 @@ set_fmt:
 		}
 
 		/*
-		 * Ask the sensor ISP's scaler (e.g. the mt9m114 IFP) to downscale to the
-		 * originally requested size instead of always passing through its full
-		 * sink crop. Sensors without scaler-on-sink support (or that can only
-		 * bypass it, like RAW10 passthrough) will reject or clamp this; that is
-		 * not fatal, it just means no downscale happens for this format/sensor.
+		 * Ask the sensor ISP (e.g. the mt9m114 IFP) to crop down to the
+		 * originally requested size instead of always passing through its
+		 * full border-adjusted sink crop. This is a plain crop (window
+		 * selection), not a scale: it avoids resampling across the last
+		 * few border-adjacent rows/columns, which are known to carry
+		 * invalid (e.g. solid green) pixel data on this sensor. Sensors
+		 * without crop support on the sink will reject or clamp this;
+		 * that is not fatal, it just means no crop happens for this
+		 * format/sensor.
 		 */
 		if (ret == 0 && (requested_width < format.format.width ||
 				 requested_height < format.format.height)) {
@@ -2813,23 +2817,23 @@ set_fmt:
 				.pad = SENSOR_ISP_PAD_SINK,
 				.target = V4L2_SEL_TGT_CROP,
 			};
-			struct v4l2_subdev_selection compose_sel = {
+			struct v4l2_subdev_selection window_sel = {
 				.which = which,
 				.pad = SENSOR_ISP_PAD_SINK,
-				.target = V4L2_SEL_TGT_COMPOSE,
+				.target = V4L2_SEL_TGT_CROP,
 				.r.width = requested_width,
 				.r.height = requested_height,
 			};
-			int compose_ret;
+			int window_ret;
 
 			v4l2_subdev_call(input->sensor_isp, pad, get_selection, sd_state, &crop_sel);
-			dev_dbg(isp->dev, "DEBUG sensor ISP sink crop before compose: %ux%u src_code=0x%x\n",
+			dev_dbg(isp->dev, "DEBUG sensor ISP sink crop before window: %ux%u src_code=0x%x\n",
 				crop_sel.r.width, crop_sel.r.height, format.format.code);
 
-			compose_ret = v4l2_subdev_call(input->sensor_isp, pad, set_selection,
-						       sd_state, &compose_sel);
-			dev_dbg(isp->dev, "Set sensor ISP compose ret: %d size %dx%d\n",
-				compose_ret, compose_sel.r.width, compose_sel.r.height);
+			window_ret = v4l2_subdev_call(input->sensor_isp, pad, set_selection,
+						      sd_state, &window_sel);
+			dev_dbg(isp->dev, "Set sensor ISP crop window ret: %d size %dx%d\n",
+				window_ret, window_sel.r.width, window_sel.r.height);
 		}
 
 		if (ret == 0) {

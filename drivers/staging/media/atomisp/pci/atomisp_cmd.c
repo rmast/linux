@@ -2671,6 +2671,27 @@ static int atomisp_set_sensor_crop_and_fmt(struct atomisp_device *isp,
 		return -EINVAL;
 
 	/*
+	 * When there is a separate sensor ISP (e.g. the mt9m114 IFP), its
+	 * source pad crops a demosaicing border off the sink size before the
+	 * compose/scale step can run. Make sure the PA (input->sensor) is
+	 * asked for extra margin here too, independent of what the caller
+	 * already added to ffmt, otherwise that border eats into the
+	 * requested size and there is nothing left for compose to scale
+	 * from, silently returning a size a few pixels short on each side.
+	 */
+	if (input->sensor_isp) {
+		u32 margin_w, margin_h;
+
+		atomisp_get_padding(isp, requested_width, requested_height, &margin_w, &margin_h);
+		sel.r.width = requested_width + margin_w;
+		sel.r.height = requested_height + margin_h;
+		format.format.width = sel.r.width;
+		format.format.height = sel.r.height;
+		ffmt->width = sel.r.width;
+		ffmt->height = sel.r.height;
+	}
+
+	/*
 	 * Some old sensor drivers already write the registers on set_fmt
 	 * instead of on stream on, power on the sensor now (on newer
 	 * sensor drivers the s_power op is a no-op).

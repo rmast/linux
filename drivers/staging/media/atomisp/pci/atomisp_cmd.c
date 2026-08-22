@@ -2641,7 +2641,9 @@ void atomisp_setup_input_links(struct atomisp_device *isp)
 
 static int atomisp_set_sensor_crop_and_fmt(struct atomisp_device *isp,
 					   struct v4l2_mbus_framefmt *ffmt,
-					   int which)
+					   int which,
+					   unsigned int requested_width,
+					   unsigned int requested_height)
 {
 	struct atomisp_input_subdev *input = &isp->inputs[isp->asd.input_curr];
 	struct v4l2_subdev_selection sel = {
@@ -2658,9 +2660,6 @@ static int atomisp_set_sensor_crop_and_fmt(struct atomisp_device *isp,
 	struct v4l2_rect try_saved_crop;
 	bool restore_try_state = false;
 	struct v4l2_subdev_state *sd_state;
-	/* Original request, used below to ask the sensor ISP scaler for this exact size. */
-	unsigned int requested_width = ffmt->width;
-	unsigned int requested_height = ffmt->height;
 	int ret = 0;
 
 	if (!input->sensor)
@@ -2769,6 +2768,7 @@ set_fmt:
 		 */
 		if (ret == 0 && (requested_width < format.format.width ||
 				 requested_height < format.format.height)) {
+			/* requested_* are the true user request, without the pad_w/pad_h margin. */
 			struct v4l2_subdev_selection compose_sel = {
 				.which = which,
 				.pad = SENSOR_ISP_PAD_SINK,
@@ -2849,7 +2849,8 @@ int atomisp_try_fmt(struct atomisp_device *isp, struct v4l2_pix_format *f,
 
 	dev_dbg(isp->dev, "try_mbus_fmt: try %ux%u\n", ffmt.width, ffmt.height);
 
-	ret = atomisp_set_sensor_crop_and_fmt(isp, &ffmt, V4L2_SUBDEV_FORMAT_TRY);
+	ret = atomisp_set_sensor_crop_and_fmt(isp, &ffmt, V4L2_SUBDEV_FORMAT_TRY,
+					      f->width, f->height);
 	if (ret)
 		return ret;
 
@@ -3321,7 +3322,8 @@ static int atomisp_set_fmt_to_snr(struct video_device *vdev, const struct v4l2_p
 
 	/* Disable dvs if resolution can't be supported by sensor */
 	if (asd->params.video_dis_en && asd->run_mode->val == ATOMISP_RUN_MODE_VIDEO) {
-		ret = atomisp_set_sensor_crop_and_fmt(isp, &ffmt, V4L2_SUBDEV_FORMAT_TRY);
+		ret = atomisp_set_sensor_crop_and_fmt(isp, &ffmt, V4L2_SUBDEV_FORMAT_TRY,
+						      f->width, f->height);
 		if (ret)
 			return ret;
 
@@ -3339,7 +3341,8 @@ static int atomisp_set_fmt_to_snr(struct video_device *vdev, const struct v4l2_p
 		}
 	}
 
-	ret = atomisp_set_sensor_crop_and_fmt(isp, &ffmt, V4L2_SUBDEV_FORMAT_ACTIVE);
+	ret = atomisp_set_sensor_crop_and_fmt(isp, &ffmt, V4L2_SUBDEV_FORMAT_ACTIVE,
+					      f->width, f->height);
 	if (ret)
 		return ret;
 

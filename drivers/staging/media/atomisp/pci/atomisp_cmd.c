@@ -2781,6 +2781,11 @@ set_fmt:
 		if (ret == 0 && (requested_width < format.format.width ||
 				 requested_height < format.format.height)) {
 			/* requested_* are the true user request, without the pad_w/pad_h margin. */
+			struct v4l2_subdev_selection crop_sel = {
+				.which = which,
+				.pad = SENSOR_ISP_PAD_SINK,
+				.target = V4L2_SEL_TGT_CROP,
+			};
 			struct v4l2_subdev_selection compose_sel = {
 				.which = which,
 				.pad = SENSOR_ISP_PAD_SINK,
@@ -2789,6 +2794,10 @@ set_fmt:
 				.r.height = requested_height,
 			};
 			int compose_ret;
+
+			v4l2_subdev_call(input->sensor_isp, pad, get_selection, sd_state, &crop_sel);
+			dev_dbg(isp->dev, "DEBUG sensor ISP sink crop before compose: %ux%u src_code=0x%x\n",
+				crop_sel.r.width, crop_sel.r.height, format.format.code);
 
 			compose_ret = v4l2_subdev_call(input->sensor_isp, pad, set_selection,
 						       sd_state, &compose_sel);

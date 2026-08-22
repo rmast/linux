@@ -2656,6 +2656,11 @@ static int atomisp_set_sensor_crop_and_fmt(struct atomisp_device *isp,
 		.which = which,
 		.format = *ffmt,
 	};
+	/* input->sensor (the PA) always forces its own RAW10 code onto
+	 * format.format below; keep the originally requested code around
+	 * to re-apply it when talking to the sensor ISP's source pad.
+	 */
+	u32 requested_code = ffmt->code;
 	struct v4l2_mbus_framefmt try_saved_format;
 	struct v4l2_rect try_saved_crop;
 	bool restore_try_state = false;
@@ -2766,6 +2771,7 @@ set_fmt:
 		 */
 		if (ret == 0) {
 			format.pad = SENSOR_ISP_PAD_SOURCE;
+			format.format.code = requested_code;
 			ret = v4l2_subdev_call(input->sensor_isp, pad, set_fmt, sd_state, &format);
 			dev_dbg(isp->dev, "Set sensor ISP source format (pre-compose) ret: %d size %dx%d\n",
 				ret, format.format.width, format.format.height);
@@ -2807,6 +2813,7 @@ set_fmt:
 
 		if (ret == 0) {
 			format.pad = SENSOR_ISP_PAD_SOURCE;
+			format.format.code = requested_code;
 			ret = v4l2_subdev_call(input->sensor_isp, pad, set_fmt, sd_state, &format);
 			dev_dbg(isp->dev, "Set sensor ISP source format ret: %d size %dx%d\n",
 				ret, format.format.width, format.format.height);

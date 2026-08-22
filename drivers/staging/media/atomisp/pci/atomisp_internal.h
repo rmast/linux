@@ -128,6 +128,8 @@ struct atomisp_input_subdev {
 	struct v4l2_rect active_rect;
 	/* Sensor state for which == V4L2_SUBDEV_FORMAT_TRY calls */
 	struct v4l2_subdev_state *try_sd_state;
+	/* Same, but for sensor_isp (e.g. mt9m114 IFP), when it exists */
+	struct v4l2_subdev_state *try_sd_state_isp;
 };
 
 enum atomisp_dfs_mode {

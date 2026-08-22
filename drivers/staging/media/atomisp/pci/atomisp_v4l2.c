@@ -809,8 +809,10 @@ static void atomisp_unregister_entities(struct atomisp_device *isp)
 	media_device_unregister(&isp->media_dev);
 	media_device_cleanup(&isp->media_dev);
 
-	for (i = 0; i < isp->input_cnt; i++)
+	for (i = 0; i < isp->input_cnt; i++) {
 		__v4l2_subdev_state_free(isp->inputs[i].try_sd_state);
+		__v4l2_subdev_state_free(isp->inputs[i].try_sd_state_isp);
+	}
 }
 
 static int atomisp_register_entities(struct atomisp_device *isp)
@@ -894,6 +896,18 @@ static void atomisp_init_sensor(struct atomisp_input_subdev *input)
 		return;
 
 	input->try_sd_state = try_sd_state;
+
+	if (input->sensor_isp) {
+		static struct lock_class_key try_sd_state_isp_key;
+		struct v4l2_subdev_state *try_sd_state_isp;
+
+		/* Same FIXME as for try_sd_state above, needed for the IFP scaler TRY probing. */
+		try_sd_state_isp = __v4l2_subdev_state_alloc(input->sensor_isp,
+							     "atomisp:try_sd_state_isp->lock",
+							     &try_sd_state_isp_key);
+		if (!IS_ERR(try_sd_state_isp))
+			input->try_sd_state_isp = try_sd_state_isp;
+	}
 
 	act_sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor);
 

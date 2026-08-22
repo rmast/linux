@@ -2741,9 +2741,19 @@ set_fmt:
 		v4l2_subdev_unlock_state(sd_state);
 	}
 
-	/* Propagate new fmt to sensor ISP */
-	if (ret == 0 && which == V4L2_SUBDEV_FORMAT_ACTIVE && input->sensor_isp) {
-		sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor_isp);
+	/*
+	 * Propagate new fmt to sensor ISP. This also runs for TRY so that the
+	 * pix format atomisp_try_fmt() reports to userspace already reflects
+	 * the IFP scaler's compose size instead of only the sink crop size.
+	 */
+	if (ret == 0 && input->sensor_isp &&
+	    (which == V4L2_SUBDEV_FORMAT_ACTIVE || input->try_sd_state_isp)) {
+		if (which == V4L2_SUBDEV_FORMAT_TRY) {
+			sd_state = input->try_sd_state_isp;
+			v4l2_subdev_lock_state(sd_state);
+		} else {
+			sd_state = v4l2_subdev_lock_and_get_active_state(input->sensor_isp);
+		}
 
 		format.pad = SENSOR_ISP_PAD_SINK;
 		ret = v4l2_subdev_call(input->sensor_isp, pad, set_fmt, sd_state, &format);

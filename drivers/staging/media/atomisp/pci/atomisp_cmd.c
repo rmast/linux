@@ -2760,6 +2760,18 @@ set_fmt:
 			ret, format.format.width, format.format.height);
 
 		/*
+		 * Set the source pad's media bus code *before* asking for compose,
+		 * since e.g. the mt9m114 IFP bypasses crop/compose entirely while
+		 * its source pad is still set to RAW10 (the sink-pad default).
+		 */
+		if (ret == 0) {
+			format.pad = SENSOR_ISP_PAD_SOURCE;
+			ret = v4l2_subdev_call(input->sensor_isp, pad, set_fmt, sd_state, &format);
+			dev_dbg(isp->dev, "Set sensor ISP source format (pre-compose) ret: %d size %dx%d\n",
+				ret, format.format.width, format.format.height);
+		}
+
+		/*
 		 * Ask the sensor ISP's scaler (e.g. the mt9m114 IFP) to downscale to the
 		 * originally requested size instead of always passing through its full
 		 * sink crop. Sensors without scaler-on-sink support (or that can only

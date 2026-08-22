@@ -111,7 +111,7 @@ sudo rm -f /var/cache/akmods/atomisp-hybrid/*.log
 sudo rm -f /var/cache/akmods/atomisp-hybrid/*.failed.log
 sudo rm -f /var/cache/akmods/atomisp-hybrid/*.rpm
 sudo akmods --force --kernels "$(uname -r)" --akmod atomisp-hybrid
-sudo depmod -a "$(uname -r)"
+#sudo depmod -a "$(uname -r)" #depmod draaiede al, onder de sudo van akmods.
 
 #om de modules ook op initramfs te krijgen
 kver="$(uname -r)"

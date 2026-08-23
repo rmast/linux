@@ -2665,7 +2665,6 @@ static int atomisp_set_sensor_crop_and_fmt(struct atomisp_device *isp,
 	struct v4l2_rect try_saved_crop;
 	bool restore_try_state = false;
 	struct v4l2_subdev_state *sd_state;
-	u32 sensor_isp_edge_margin = input->sensor_isp ? 4 : 0;
 	int ret = 0;
 
 	if (!input->sensor)
@@ -2799,46 +2798,6 @@ set_fmt:
 				ret, format.format.width, format.format.height);
 		}
 
-		/*
-		 * Ask the sensor ISP (e.g. the mt9m114 IFP) to crop down to the
-		 * originally requested size instead of always passing through its
-		 * full border-adjusted sink crop. This is a plain crop (window
-		 * selection), not a scale: it avoids resampling across the last
-		 * few border-adjacent rows/columns, which are known to carry
-		 * invalid (e.g. solid green) pixel data on this sensor. Sensors
-		 * without crop support on the sink will reject or clamp this;
-		 * that is not fatal, it just means no crop happens for this
-		 * format/sensor.
-		 */
-		if (ret == 0 && (requested_width < format.format.width ||
-				 requested_height < format.format.height)) {
-			/* requested_* are the true user request, without the pad_w/pad_h margin. */
-			struct v4l2_subdev_selection crop_sel = {
-				.which = which,
-				.pad = SENSOR_ISP_PAD_SINK,
-				.target = V4L2_SEL_TGT_CROP,
-			};
-			struct v4l2_subdev_selection window_sel = {
-				.which = which,
-				.pad = SENSOR_ISP_PAD_SINK,
-				.target = V4L2_SEL_TGT_CROP,
-				.r.width = min_t(u32, requested_width + sensor_isp_edge_margin,
-					       format.format.width),
-				.r.height = min_t(u32, requested_height + sensor_isp_edge_margin,
-						format.format.height),
-			};
-			int window_ret;
-
-			v4l2_subdev_call(input->sensor_isp, pad, get_selection, sd_state, &crop_sel);
-			dev_dbg(isp->dev, "DEBUG sensor ISP sink crop before window: %ux%u src_code=0x%x\n",
-				crop_sel.r.width, crop_sel.r.height, format.format.code);
-
-			window_ret = v4l2_subdev_call(input->sensor_isp, pad, set_selection,
-						      sd_state, &window_sel);
-			dev_dbg(isp->dev, "Set sensor ISP crop window ret: %d size %dx%d\n",
-				window_ret, window_sel.r.width, window_sel.r.height);
-		}
-
 		if (ret == 0) {
 			format.pad = SENSOR_ISP_PAD_SOURCE;
 			format.format.code = requested_code;
@@ -2925,13 +2884,8 @@ int atomisp_try_fmt(struct atomisp_device *isp, struct v4l2_pix_format *f,
 	/*
 	 * Recalculate padding for the sensor-selected size to keep TRY probing
 	 * deterministic across repeated calls with the same user request.
-	 * If the sensor ISP already delivered exactly the requested size, or a
-	 * tiny deliberate overscan for later ISP-side edge cropping, keep the
-	 * userspace-visible size at the original request.
 	 */
-	if (isp->inputs[asd->input_curr].sensor_isp &&
-	    ffmt.width >= req_width && ffmt.width <= req_width + 4 &&
-	    ffmt.height >= req_height && ffmt.height <= req_height + 4) {
+	if (ffmt.width == req_width && ffmt.height == req_height) {
 		f->width = req_width;
 		f->height = req_height;
 	} else {

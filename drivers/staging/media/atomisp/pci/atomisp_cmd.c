@@ -2665,7 +2665,7 @@ static int atomisp_set_sensor_crop_and_fmt(struct atomisp_device *isp,
 	struct v4l2_rect try_saved_crop;
 	bool restore_try_state = false;
 	struct v4l2_subdev_state *sd_state;
-	u32 sensor_isp_edge_margin = input->sensor_isp ? 2 : 0;
+	u32 sensor_isp_edge_margin = input->sensor_isp ? 4 : 0;
 	int ret = 0;
 
 	if (!input->sensor)
@@ -2930,8 +2930,8 @@ int atomisp_try_fmt(struct atomisp_device *isp, struct v4l2_pix_format *f,
 	 * userspace-visible size at the original request.
 	 */
 	if (isp->inputs[asd->input_curr].sensor_isp &&
-	    ffmt.width >= req_width && ffmt.width <= req_width + 2 &&
-	    ffmt.height >= req_height && ffmt.height <= req_height + 2) {
+	    ffmt.width >= req_width && ffmt.width <= req_width + 4 &&
+	    ffmt.height >= req_height && ffmt.height <= req_height + 4) {
 		f->width = req_width;
 		f->height = req_height;
 	} else {

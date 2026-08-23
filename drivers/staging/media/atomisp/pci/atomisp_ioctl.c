@@ -84,7 +84,7 @@ const struct atomisp_format_bridge atomisp_output_fmts[] = {
 	}, {
 		.pixelformat = V4L2_PIX_FMT_YUYV,
 		.depth = 16,
-		.mbus_code = V4L2_MBUS_FMT_CUSTOM_YUYV,
+		.mbus_code = MEDIA_BUS_FMT_YUYV8_1X16,
 		.sh_fmt = IA_CSS_FRAME_FORMAT_YUYV,
 		.description = "YUYV, interleaved"
 	}, {

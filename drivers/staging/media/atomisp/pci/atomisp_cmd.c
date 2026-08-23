@@ -2665,6 +2665,7 @@ static int atomisp_set_sensor_crop_and_fmt(struct atomisp_device *isp,
 	struct v4l2_rect try_saved_crop;
 	bool restore_try_state = false;
 	struct v4l2_subdev_state *sd_state;
+	u32 sensor_isp_edge_margin = input->sensor_isp ? 2 : 0;
 	int ret = 0;
 
 	if (!input->sensor)
@@ -2821,8 +2822,10 @@ set_fmt:
 				.which = which,
 				.pad = SENSOR_ISP_PAD_SINK,
 				.target = V4L2_SEL_TGT_CROP,
-				.r.width = requested_width,
-				.r.height = requested_height,
+				.r.width = min_t(u32, requested_width + sensor_isp_edge_margin,
+					       format.format.width),
+				.r.height = min_t(u32, requested_height + sensor_isp_edge_margin,
+						format.format.height),
 			};
 			int window_ret;
 
@@ -2922,13 +2925,15 @@ int atomisp_try_fmt(struct atomisp_device *isp, struct v4l2_pix_format *f,
 	/*
 	 * Recalculate padding for the sensor-selected size to keep TRY probing
 	 * deterministic across repeated calls with the same user request.
-	 * If the sensor ISP's scaler already delivered exactly the requested
-	 * size (e.g. via the compose path in atomisp_set_sensor_crop_and_fmt()),
-	 * there is no padding left to strip back off.
+	 * If the sensor ISP already delivered exactly the requested size, or a
+	 * tiny deliberate overscan for later ISP-side edge cropping, keep the
+	 * userspace-visible size at the original request.
 	 */
-	if (ffmt.width == req_width && ffmt.height == req_height) {
-		f->width = ffmt.width;
-		f->height = ffmt.height;
+	if (isp->inputs[asd->input_curr].sensor_isp &&
+	    ffmt.width >= req_width && ffmt.width <= req_width + 2 &&
+	    ffmt.height >= req_height && ffmt.height <= req_height + 2) {
+		f->width = req_width;
+		f->height = req_height;
 	} else {
 		atomisp_get_padding(isp, ffmt.width, ffmt.height, &padding_w, &padding_h);
 		f->width = ffmt.width > padding_w ? ffmt.width - padding_w : ffmt.width;

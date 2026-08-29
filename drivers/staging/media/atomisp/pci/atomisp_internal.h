@@ -194,6 +194,7 @@ struct atomisp_device {
 	int sensor_lanes[N_MIPI_PORT_ID];
 	struct v4l2_subdev *sensor_subdevs[ATOMISP_CAMERA_NR_PORTS];
 	unsigned int input_cnt;
+	bool device_nodes_registered;
 	struct atomisp_input_subdev inputs[ATOM_ISP_MAX_INPUTS];
 
 	struct atomisp_regs saved_regs;

@@ -1009,6 +1009,11 @@ int atomisp_register_device_nodes(struct atomisp_device *isp)
 	struct atomisp_input_subdev *input;
 	int i, err, source_pad;
 
+	if (isp->device_nodes_registered) {
+		dev_dbg(isp->dev, "device nodes already registered\n");
+		return 0;
+	}
+
 	for (i = 0; i < ATOMISP_CAMERA_NR_PORTS; i++) {
 		err = media_create_pad_link(&isp->csi2_port[i].subdev.entity,
 					    CSI2_PAD_SOURCE, &isp->asd.subdev.entity,
@@ -1083,7 +1088,13 @@ int atomisp_register_device_nodes(struct atomisp_device *isp)
 	if (err)
 		return err;
 
-	return media_device_register(&isp->media_dev);
+	err = media_device_register(&isp->media_dev);
+	if (err)
+		return err;
+
+	isp->device_nodes_registered = true;
+
+	return 0;
 }
 
 static int atomisp_initialize_modules(struct atomisp_device *isp)

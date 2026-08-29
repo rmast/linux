@@ -618,9 +618,6 @@ static int atomisp_enum_fmt_cap(struct file *file, void *fh,
 			return ret;
 	}
 
-	if (!input->sensor_isp && !f->mbus_code && sensor_mbus_code)
-		f->mbus_code = sensor_mbus_code;
-
 	if (!input->sensor_isp && f->mbus_code && !filter_by_mbus_code)
 		return -EINVAL;
 

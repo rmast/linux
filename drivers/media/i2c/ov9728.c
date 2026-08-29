@@ -879,6 +879,10 @@ static int ov9728_check_hwcfg(struct device *dev)
 		goto check_hwcfg_error;
 	}
 
+	for (j = 0; j < bus_cfg.nr_of_link_frequencies; j++)
+		dev_info(dev, "endpoint link frequency[%u] = %lld Hz\n", j,
+			 bus_cfg.link_frequencies[j]);
+
 	for (i = 0; i < ARRAY_SIZE(link_freq_menu_items); i++) {
 		for (j = 0; j < bus_cfg.nr_of_link_frequencies; j++) {
 			if (link_freq_menu_items[i] ==

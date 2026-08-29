@@ -4,6 +4,7 @@
 #include <linux/acpi.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
+#include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
@@ -20,8 +21,12 @@
 #define OV9728_DATA_LANES		1
 #define OV9728_RGB_DEPTH		10
 
+#define OV9728_NATIVE_WIDTH		1296
+#define OV9728_NATIVE_HEIGHT		736
+
 #define OV9728_REG_CHIP_ID		0x300a
 #define OV9728_CHIP_ID			0x9728
+#define OV9728_DEFAULT_I2C_ADDR		0x36
 
 #define OV9728_REG_MODE_SELECT		0x0100
 #define OV9728_MODE_STANDBY		0x00
@@ -196,8 +201,8 @@ static const struct ov9728_link_freq_config link_freq_configs[] = {
 
 static const struct ov9728_mode supported_modes[] = {
 	{
-		.width = 1296,
-		.height = 736,
+		.width = OV9728_NATIVE_WIDTH,
+		.height = OV9728_NATIVE_HEIGHT,
 		.hts = 0x0560,
 		.vts_def = OV9728_VTS_30FPS,
 		.vts_min = OV9728_VTS_30FPS_MIN,
@@ -213,6 +218,8 @@ struct ov9728 {
 	struct device *dev;
 	struct regmap *regmap;
 	struct clk *clk;
+	struct gpio_desc *reset_gpio;
+	struct gpio_desc *powerdown_gpio;
 
 	struct v4l2_subdev sd;
 	struct media_pad pad;
@@ -283,6 +290,38 @@ static int ov9728_read_reg(struct ov9728 *ov9728, u16 reg, u16 len, u32 *val)
 		*val = value;
 
 	return ret;
+}
+
+static int ov9728_read_chip_id_at_addr(struct i2c_adapter *adapter, u16 addr,
+					       u32 *val)
+{
+	u8 addr_buf[2] = {
+		OV9728_REG_CHIP_ID >> 8,
+		OV9728_REG_CHIP_ID & 0xff,
+	};
+	u8 data_buf[2] = { 0 };
+	struct i2c_msg msgs[2] = {
+		{
+			.addr = addr,
+			.flags = 0,
+			.len = sizeof(addr_buf),
+			.buf = addr_buf,
+		}, {
+			.addr = addr,
+			.flags = I2C_M_RD,
+			.len = sizeof(data_buf),
+			.buf = data_buf,
+		},
+	};
+	int ret;
+
+	ret = i2c_transfer(adapter, msgs, ARRAY_SIZE(msgs));
+	if (ret != ARRAY_SIZE(msgs))
+		return ret < 0 ? ret : -EIO;
+
+	*val = (data_buf[0] << 8) | data_buf[1];
+
+	return 0;
 }
 
 static int ov9728_write_reg(struct ov9728 *ov9728, u16 reg, u16 len, u32 val)
@@ -675,6 +714,28 @@ static int ov9728_enum_frame_size(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int ov9728_get_selection(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *sd_state,
+				struct v4l2_subdev_selection *sel)
+{
+	if (sel->pad)
+		return -EINVAL;
+
+	switch (sel->target) {
+	case V4L2_SEL_TGT_CROP:
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+	case V4L2_SEL_TGT_NATIVE_SIZE:
+		sel->r.left = 0;
+		sel->r.top = 0;
+		sel->r.width = OV9728_NATIVE_WIDTH;
+		sel->r.height = OV9728_NATIVE_HEIGHT;
+		return 0;
+	default:
+		return -EINVAL;
+	}
+}
+
 static int ov9728_init_state(struct v4l2_subdev *sd,
 			     struct v4l2_subdev_state *state)
 {
@@ -693,6 +754,7 @@ static const struct v4l2_subdev_pad_ops ov9728_pad_ops = {
 	.get_fmt = ov9728_get_format,
 	.enum_mbus_code = ov9728_enum_mbus_code,
 	.enum_frame_size = ov9728_enum_frame_size,
+	.get_selection = ov9728_get_selection,
 	.enable_streams = ov9728_enable_streams,
 	.disable_streams = ov9728_disable_streams,
 };
@@ -710,14 +772,63 @@ static const struct v4l2_subdev_internal_ops ov9728_internal_ops = {
 	.init_state = ov9728_init_state,
 };
 
+static int ov9728_power_on(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct ov9728 *ov9728 = to_ov9728(sd);
+	int ret;
+
+	ret = clk_prepare_enable(ov9728->clk);
+	if (ret)
+		return ret;
+
+	gpiod_set_value_cansleep(ov9728->powerdown_gpio, 0);
+	gpiod_set_value_cansleep(ov9728->reset_gpio, 0);
+	usleep_range(20000, 25000);
+
+	return 0;
+}
+
+static int ov9728_power_off(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct ov9728 *ov9728 = to_ov9728(sd);
+
+	gpiod_set_value_cansleep(ov9728->reset_gpio, 1);
+	gpiod_set_value_cansleep(ov9728->powerdown_gpio, 1);
+
+	clk_disable_unprepare(ov9728->clk);
+
+	return 0;
+}
+
 static int ov9728_identify_module(struct ov9728 *ov9728)
 {
+	struct i2c_client *client = v4l2_get_subdevdata(&ov9728->sd);
 	int ret;
 	u32 val;
 
 	ret = ov9728_read_reg(ov9728, OV9728_REG_CHIP_ID, 2, &val);
-	if (ret)
+	if (ret) {
+		if (ret == -EREMOTEIO && client->addr != OV9728_DEFAULT_I2C_ADDR) {
+			int alt_ret;
+			u32 alt_val;
+
+			alt_ret = ov9728_read_chip_id_at_addr(client->adapter,
+							      OV9728_DEFAULT_I2C_ADDR,
+							      &alt_val);
+			if (alt_ret)
+				dev_info(ov9728->dev,
+					 "no chip-id response at fallback I2C address 0x%02x: %d\n",
+					 OV9728_DEFAULT_I2C_ADDR, alt_ret);
+			else
+				dev_info(ov9728->dev,
+					 "fallback I2C address 0x%02x returned chip id 0x%04x\n",
+					 OV9728_DEFAULT_I2C_ADDR, alt_val);
+		}
+
 		return ret;
+	}
 
 	if (val != OV9728_CHIP_ID) {
 		dev_err(ov9728->dev, "chip id mismatch: %x!=%x",
@@ -799,6 +910,8 @@ static void ov9728_remove(struct i2c_client *client)
 	media_entity_cleanup(&sd->entity);
 	v4l2_ctrl_handler_free(sd->ctrl_handler);
 	pm_runtime_disable(ov9728->dev);
+	if (!pm_runtime_status_suspended(ov9728->dev))
+		ov9728_power_off(ov9728->dev);
 	pm_runtime_set_suspended(ov9728->dev);
 	mutex_destroy(&ov9728->mutex);
 }
@@ -833,16 +946,41 @@ static int ov9728_probe(struct i2c_client *client)
 				     "external clock %lu is not supported",
 				     freq);
 
+	ov9728->reset_gpio = devm_gpiod_get_optional(ov9728->dev, "reset",
+						      GPIOD_OUT_HIGH);
+	if (IS_ERR(ov9728->reset_gpio))
+		return dev_err_probe(ov9728->dev, PTR_ERR(ov9728->reset_gpio),
+				     "failed to get reset GPIO\n");
+
+	ov9728->powerdown_gpio = devm_gpiod_get_optional(ov9728->dev, "powerdown",
+							  GPIOD_OUT_HIGH);
+	if (IS_ERR(ov9728->powerdown_gpio))
+		return dev_err_probe(ov9728->dev, PTR_ERR(ov9728->powerdown_gpio),
+				     "failed to get powerdown GPIO\n");
+
+	dev_info(ov9728->dev, "GPIOs: reset=%s powerdown=%s\n",
+		 ov9728->reset_gpio ? "present" : "absent",
+		 ov9728->powerdown_gpio ? "present" : "absent");
+
 	v4l2_i2c_subdev_init(&ov9728->sd, client, &ov9728_subdev_ops);
 	ov9728->regmap = devm_cci_regmap_init_i2c(client, 16);
 	if (IS_ERR(ov9728->regmap))
 		return dev_err_probe(ov9728->dev, PTR_ERR(ov9728->regmap),
 				     "failed to initialize CCI\n");
 
+	pm_runtime_enable(ov9728->dev);
+
+	ret = pm_runtime_resume_and_get(ov9728->dev);
+	if (ret)
+		goto probe_error_pm_disable;
+
+	dev_info(ov9728->dev, "probing sensor at I2C address 0x%02x\n",
+		 client->addr);
+
 	ret = ov9728_identify_module(ov9728);
 	if (ret) {
 		dev_err(ov9728->dev, "failed to find sensor: %d", ret);
-		return ret;
+		goto probe_error_pm_put;
 	}
 
 	mutex_init(&ov9728->mutex);
@@ -870,13 +1008,8 @@ static int ov9728_probe(struct i2c_client *client)
 		goto probe_error_media_entity_cleanup;
 	}
 
-	/*
-	 * Device is already turned on by i2c-core with ACPI domain PM.
-	 * Enable runtime PM and turn off the device.
-	 */
-	pm_runtime_set_active(ov9728->dev);
-	pm_runtime_enable(ov9728->dev);
-	pm_runtime_idle(ov9728->dev);
+	pm_runtime_set_autosuspend_delay(ov9728->dev, 1000);
+	pm_runtime_use_autosuspend(ov9728->dev);
 
 	ret = v4l2_async_register_subdev_sensor(&ov9728->sd);
 	if (ret < 0) {
@@ -885,11 +1018,11 @@ static int ov9728_probe(struct i2c_client *client)
 		goto probe_error_subdev_cleanup_pm;
 	}
 
+	pm_runtime_put_autosuspend(ov9728->dev);
+
 	return 0;
 
 probe_error_subdev_cleanup_pm:
-	pm_runtime_disable(ov9728->dev);
-	pm_runtime_set_suspended(ov9728->dev);
 	v4l2_subdev_cleanup(&ov9728->sd);
 
 probe_error_media_entity_cleanup:
@@ -899,8 +1032,19 @@ probe_error_v4l2_ctrl_handler_free:
 	v4l2_ctrl_handler_free(ov9728->sd.ctrl_handler);
 	mutex_destroy(&ov9728->mutex);
 
+probe_error_pm_put:
+	pm_runtime_put_sync_suspend(ov9728->dev);
+
+probe_error_pm_disable:
+	pm_runtime_disable(ov9728->dev);
+	pm_runtime_set_suspended(ov9728->dev);
+
 	return ret;
 }
+
+static const struct dev_pm_ops ov9728_pm_ops = {
+	SET_RUNTIME_PM_OPS(ov9728_power_off, ov9728_power_on, NULL)
+};
 
 static const struct acpi_device_id ov9728_acpi_ids[] = {
 	{ "OVTI9728", },
@@ -913,6 +1057,7 @@ static struct i2c_driver ov9728_i2c_driver = {
 	.driver = {
 		.name = "ov9728",
 		.acpi_match_table = ov9728_acpi_ids,
+		.pm = &ov9728_pm_ops,
 	},
 	.probe = ov9728_probe,
 	.remove = ov9728_remove,

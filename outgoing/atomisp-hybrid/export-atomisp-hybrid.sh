@@ -100,6 +100,9 @@ mkdir -p "$PKG_DIR/external/mt9m114"
 cp -a drivers/media/i2c/mt9m114.c "$PKG_DIR/external/mt9m114/"
 cp -a drivers/media/i2c/aptina-pll.h "$PKG_DIR/external/mt9m114/"
 
+mkdir -p "$PKG_DIR/external/ov9728"
+cp -a drivers/media/i2c/ov9728.c "$PKG_DIR/external/ov9728/"
+
 echo "[2/6] Add hybrid build glue"
 cp -a outgoing/atomisp-hybrid/templates/source-root/Makefile "$PKG_DIR/Makefile"
 cp -a outgoing/atomisp-hybrid/templates/source-root/dkms.conf "$PKG_DIR/dkms.conf"
@@ -107,6 +110,8 @@ cp -a outgoing/atomisp-hybrid/templates/source-root/external/ipu-bridge/Makefile
   "$PKG_DIR/external/ipu-bridge/Makefile"
 cp -a outgoing/atomisp-hybrid/templates/source-root/external/mt9m114/Makefile \
   "$PKG_DIR/external/mt9m114/Makefile"
+cp -a outgoing/atomisp-hybrid/templates/source-root/external/ov9728/Makefile \
+  "$PKG_DIR/external/ov9728/Makefile"
 cp -a COPYING "$PKG_DIR/COPYING"
 
 sed -i \
@@ -118,6 +123,7 @@ inject_module_metadata "$PKG_DIR/drivers/staging/media/atomisp/pci/atomisp_v4l2.
 inject_module_metadata "$PKG_DIR/drivers/staging/media/atomisp/pci/atomisp_gmin_platform.c"
 inject_module_metadata "$PKG_DIR/external/ipu-bridge/ipu-bridge.c"
 inject_module_metadata "$PKG_DIR/external/mt9m114/mt9m114.c"
+inject_module_metadata "$PKG_DIR/external/ov9728/ov9728.c"
 
 # Patch the atomisp Makefile for out-of-tree (DKMS/akmod) builds:
 # 1. Replace the hardcoded srctree path with M-based path

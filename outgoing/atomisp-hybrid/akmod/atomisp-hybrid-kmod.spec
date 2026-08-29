@@ -9,7 +9,7 @@
 Name:           %{kmod_name}-kmod
 Version:        %{src_version}
 Release:        1%{?dist}
-Summary:        Out-of-tree camera kmods (atomisp, ipu-bridge, mt9m114)
+Summary:        Out-of-tree camera kmods (atomisp, ipu-bridge, mt9m114, ov9728)
 License:        GPL-2.0-only
 URL:            https://example.invalid/%{kmod_name}
 Source0:        %{kmod_name}-%{version}.tar.gz
@@ -56,6 +56,7 @@ cat > %{buildroot}/usr/lib/depmod.d/atomisp-hybrid.conf <<'EOF'
 override atomisp * extra/atomisp-hybrid
 override atomisp_gmin_platform * extra/atomisp-hybrid
 override mt9m114 * extra/atomisp-hybrid
+override ov9728 * extra/atomisp-hybrid
 override ipu_bridge * extra/atomisp-hybrid
 override ipu-bridge * extra/atomisp-hybrid
 EOF
@@ -65,6 +66,7 @@ for kver in %{kernels}; do
   install -m 0644 drivers/staging/media/atomisp/pci/atomisp_gmin_platform.ko %{buildroot}/lib/modules/${kver}/extra/%{kmod_name}/
   install -m 0644 external/ipu-bridge/ipu-bridge.ko %{buildroot}/lib/modules/${kver}/extra/%{kmod_name}/
   install -m 0644 external/mt9m114/mt9m114.ko %{buildroot}/lib/modules/${kver}/extra/%{kmod_name}/
+  install -m 0644 external/ov9728/ov9728.ko %{buildroot}/lib/modules/${kver}/extra/%{kmod_name}/
 done
 
 %post

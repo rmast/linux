@@ -12,6 +12,7 @@ De oplossing bouwt deze modules:
 - `atomisp_gmin_platform`
 - `ipu-bridge`
 - `mt9m114`
+- `ov9728`
 
 Versie-opmaak:
 - de export gebruikt `YYYYMMDDgitz<commit_epoch>.<short_hash>`
@@ -51,6 +52,7 @@ Controle:
 modinfo atomisp | head
 modinfo ipu-bridge | head
 modinfo mt9m114 | head
+modinfo ov9728 | head
 modinfo -F version mt9m114
 modinfo -F atomisp_hybrid_commit mt9m114
 modinfo -F atomisp_hybrid_base_commit mt9m114
@@ -164,13 +166,14 @@ sudo depmod -a "$(uname -r)"
 sudo modprobe atomisp
 sudo modprobe ipu-bridge
 sudo modprobe mt9m114
+sudo modprobe ov9728
 ```
 
 Controle:
 
 ```bash
 modinfo atomisp | head
-lsmod | grep -E 'atomisp|ipu_bridge|mt9m114'
+lsmod | grep -E 'atomisp|ipu_bridge|mt9m114|ov9728'
 ```
 
 Let op over bestandstijd (`ls -l`):
@@ -182,12 +185,13 @@ Controleer ook dat vervangende modules echt uit `updates/` komen en niet uit de 
 
 ```bash
 modinfo mt9m114 | head
+modinfo ov9728 | head
 modinfo ipu_bridge | head
 ```
 
 Als je daar nog paden ziet onder `/kernel/drivers/...`, dan is de override nog niet actief.
 De package installeert de modules onder `extra/atomisp-hybrid/` en gebruikt daarnaast
-`depmod.d` overrides voor `atomisp`, `atomisp_gmin_platform`, `mt9m114` en `ipu_bridge`, zodat:
+`depmod.d` overrides voor `atomisp`, `atomisp_gmin_platform`, `mt9m114`, `ov9728` en `ipu_bridge`, zodat:
 
 - `akmods` de kmods als "al gebouwd" herkent
 - jouw vervangende modules toch voorrang krijgen op de Fedora in-tree modules
@@ -232,9 +236,10 @@ sudo akmods --force --kernels "$(uname -r)" --akmod atomisp-hybrid
 - `akmods` moet `akmodsbuild` kunnen uitvoeren (`command -v akmodsbuild`).
 - Op sommige systemen heet het pakket `akmods-build`, op andere zit `akmodsbuild` al in `akmods`.
 - De kmod package installeert de modules onder `/lib/modules/<kernel>/extra/atomisp-hybrid/`.
-- Een bestand onder `/usr/lib/depmod.d/atomisp-hybrid.conf` geeft `mt9m114` en `ipu_bridge` expliciet voorrang uit `extra/atomisp-hybrid`.
+- Een bestand onder `/usr/lib/depmod.d/atomisp-hybrid.conf` geeft `mt9m114`, `ov9728` en `ipu_bridge` expliciet voorrang uit `extra/atomisp-hybrid`.
 - Als Fedora kernelconfig `CONFIG_VIDEO_ATOMISP` niet op `m` staat, forceert deze build dat alleen binnen de externe module-build.
 - Dit verandert niets aan je wifi-stack; je kunt dus distro-kernel + losse camera-modules combineren.
+- `ov9728` gebruikt de generieke `v4l2-cci` regmap-helpers (`CONFIG_V4L2_CCI_I2C`); dat modstandaard-onderdeel wordt niet door deze package gebouwd, maar hoort al in de distro-kernel te zitten (`modinfo v4l2-cci`).
 
 ## 5. Waarom akmods anders elke boot opnieuw bouwt
 

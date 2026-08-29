@@ -4,7 +4,7 @@
 Name:           akmod-%{kmod_name}
 Version:        %{src_version}
 Release:        1%{?dist}
-Summary:        Hybrid atomisp camera modules (atomisp, ipu-bridge, mt9m114)
+Summary:        Hybrid atomisp camera modules (atomisp, ipu-bridge, mt9m114, ov9728)
 License:        GPL-2.0-only
 URL:            https://example.invalid/%{kmod_name}
 Source0:        %{kmod_name}-kmod-%{version}-%{release}.src.rpm

@@ -11,8 +11,10 @@ modules:
 	$(MAKE) -C $(KDIR) M=$(PWD)/drivers/staging/media/atomisp CONFIG_VIDEO_ATOMISP=m modules
 	$(MAKE) -C $(KDIR) M=$(PWD)/external/ipu-bridge modules
 	$(MAKE) -C $(KDIR) M=$(PWD)/external/mt9m114 modules
+	$(MAKE) -C $(KDIR) M=$(PWD)/external/ov9728 modules
 
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD)/drivers/staging/media/atomisp clean
 	$(MAKE) -C $(KDIR) M=$(PWD)/external/ipu-bridge clean
 	$(MAKE) -C $(KDIR) M=$(PWD)/external/mt9m114 clean
+	$(MAKE) -C $(KDIR) M=$(PWD)/external/ov9728 clean

@@ -28,6 +28,20 @@
 #define OV9728_CHIP_ID			0x9728
 #define OV9728_DEFAULT_I2C_ADDR		0x36
 
+#define OV9728_REG_MIPI_CTRL00		0x300e
+#define OV9728_REG_MIPI_CTRL03		0x3011
+#define OV9728_REG_MIPI_CTRL14		0x4800
+#define OV9728_REG_MIPI_CTRL19		0x4805
+#define OV9728_REG_MIPI_TIMING21	0x4821
+#define OV9728_REG_MIPI_TIMING23	0x4823
+#define OV9728_REG_MIPI_TIMING37	0x4837
+#define OV9728_REG_SYS_CTRL00		0x3001
+#define OV9728_REG_SYS_CTRL01		0x3002
+#define OV9728_REG_SYS_CTRL06		0x3007
+#define OV9728_REG_MIPI_SC_CTRL0	0x3010
+#define OV9728_REG_MIPI_SC_CTRL4	0x3014
+#define OV9728_REG_ISP_CTRL00		0x5000
+
 #define OV9728_REG_MODE_SELECT		0x0100
 #define OV9728_MODE_STANDBY		0x00
 #define OV9728_MODE_STREAMING		0x01
@@ -133,7 +147,47 @@ static const struct ov9728_reg mode_1296x736_regs[] = {
 	/*
 	 * Full-res 1296x736 (native 1MP readout), no binning:
 	 * 0x0383/0x0385/0x0387 = 0x01 => X/Y increment = 1 (no subsampling)
+	 *
+	 * Use the legacy 0x3800-0x382c timing/window registers from the
+	 * original prototype while avoiding the broad ISP/effect block that
+	 * made the sensor stop ACKing I2C at 0x5000.
 	 */
+	{0x3800, 0x00},
+	{0x3801, 0x04},
+	{0x3802, 0x00},
+	{0x3803, 0x04},
+	{0x3804, 0x05},
+	{0x3805, 0x0b},
+	{0x3806, 0x02},
+	{0x3807, 0xdb},
+	{0x3808, 0x05},
+	{0x3809, 0x00},
+	{0x380a, 0x02},
+	{0x380b, 0xd0},
+	{0x380c, 0x05},
+	{0x380d, 0xc6},
+	{0x380e, 0x03},
+	{0x380f, 0x22},
+	{0x3810, 0x00},
+	{0x3811, 0x04},
+	{0x3812, 0x00},
+	{0x3813, 0x04},
+	{0x3816, 0x00},
+	{0x3817, 0x00},
+	{0x3818, 0x00},
+	{0x3819, 0x04},
+	{0x3820, 0x18},
+	{0x3821, 0x00},
+	{0x382c, 0x06},
+	{0x380f, 0x2a},
+	{0x3801, 0x00},
+	{0x3803, 0x00},
+	{0x3805, 0x0f},
+	{0x3807, 0xdf},
+	{0x3809, 0x10},
+	{0x380b, 0xde},
+	{0x3811, 0x00},
+	{0x3813, 0x01},
 	{0x0344, 0x00},
 	{0x0345, 0x00},
 	{0x0346, 0x00},
@@ -169,13 +223,16 @@ static const struct ov9728_reg mode_1296x736_regs[] = {
 	{0x3821, 0x00},
 	{0x4501, 0x08},
 	{0x3820, 0xa0},
+	{0x4800, 0x00},
+	{0x4805, 0x00},
 	{0x4801, 0x0f},
 	{0x4801, 0x8f},
+	{0x4821, 0x50},
+	{0x4823, 0x50},
+	{0x4837, 0x2d},
 	{0x4814, 0x2b},
 	{0x4307, 0x3a},
 	{0x370a, 0x23},
-	{0x5000, 0x06},
-	{0x5001, 0x73},
 };
 
 static const char * const ov9728_test_pattern_menu[] = {
@@ -547,6 +604,48 @@ static void ov9728_update_pad_format(const struct ov9728_mode *mode,
 	fmt->xfer_func = V4L2_XFER_FUNC_NONE;
 }
 
+static void ov9728_log_stream_registers(struct ov9728 *ov9728)
+{
+	struct {
+		const char *name;
+		u16 reg;
+		u16 len;
+	} regs[] = {
+		{ "mode", OV9728_REG_MODE_SELECT, 1 },
+		{ "chip_id", OV9728_REG_CHIP_ID, 2 },
+		{ "mipi_ctrl00", OV9728_REG_MIPI_CTRL00, 1 },
+		{ "mipi_ctrl03", OV9728_REG_MIPI_CTRL03, 1 },
+		{ "mipi_ctrl14", OV9728_REG_MIPI_CTRL14, 1 },
+		{ "mipi_ctrl19", OV9728_REG_MIPI_CTRL19, 1 },
+		{ "mipi_timing21", OV9728_REG_MIPI_TIMING21, 1 },
+		{ "mipi_timing23", OV9728_REG_MIPI_TIMING23, 1 },
+		{ "mipi_timing37", OV9728_REG_MIPI_TIMING37, 1 },
+		{ "sys_ctrl00", OV9728_REG_SYS_CTRL00, 1 },
+		{ "sys_ctrl01", OV9728_REG_SYS_CTRL01, 1 },
+		{ "sys_ctrl06", OV9728_REG_SYS_CTRL06, 1 },
+		{ "mipi_sc_ctrl0", OV9728_REG_MIPI_SC_CTRL0, 1 },
+		{ "mipi_sc_ctrl4", OV9728_REG_MIPI_SC_CTRL4, 1 },
+		{ "isp_ctrl00", OV9728_REG_ISP_CTRL00, 1 },
+		{ "test_pattern", OV9728_REG_TEST_PATTERN, 1 },
+	};
+	unsigned int i;
+	u32 val;
+	int ret;
+
+	for (i = 0; i < ARRAY_SIZE(regs); i++) {
+		ret = ov9728_read_reg(ov9728, regs[i].reg, regs[i].len, &val);
+		if (ret) {
+			dev_info(ov9728->dev,
+				 "stream readback %s reg 0x%04x failed: %d\n",
+				 regs[i].name, regs[i].reg, ret);
+			continue;
+		}
+
+		dev_info(ov9728->dev, "stream readback %s reg 0x%04x = 0x%0*x\n",
+			 regs[i].name, regs[i].reg, regs[i].len * 2, val);
+	}
+}
+
 static int ov9728_start_streaming(struct ov9728 *ov9728)
 {
 	const struct ov9728_reg_list *reg_list;
@@ -575,6 +674,8 @@ static int ov9728_start_streaming(struct ov9728 *ov9728)
 			       1, OV9728_MODE_STREAMING);
 	if (ret)
 		dev_err(ov9728->dev, "failed to start stream");
+	else
+		ov9728_log_stream_registers(ov9728);
 
 	return ret;
 }
@@ -586,21 +687,24 @@ static void ov9728_stop_streaming(struct ov9728 *ov9728)
 		dev_err(ov9728->dev, "failed to stop stream");
 }
 
-static int ov9728_enable_streams(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *state, u32 pad,
-				 u64 streams_mask)
+static int ov9728_set_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct ov9728 *ov9728 = to_ov9728(sd);
-	int ret;
+	int ret = 0;
 
 	mutex_lock(&ov9728->mutex);
 
-	ret = pm_runtime_resume_and_get(ov9728->dev);
-	if (ret < 0)
-		goto unlock;
+	if (enable) {
+		ret = pm_runtime_resume_and_get(ov9728->dev);
+		if (ret < 0)
+			goto unlock;
 
-	ret = ov9728_start_streaming(ov9728);
-	if (ret) {
+		ret = ov9728_start_streaming(ov9728);
+		if (ret) {
+			ov9728_stop_streaming(ov9728);
+			pm_runtime_put(ov9728->dev);
+		}
+	} else {
 		ov9728_stop_streaming(ov9728);
 		pm_runtime_put(ov9728->dev);
 	}
@@ -609,20 +713,6 @@ unlock:
 	mutex_unlock(&ov9728->mutex);
 
 	return ret;
-}
-
-static int ov9728_disable_streams(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_state *state, u32 pad,
-				  u64 streams_mask)
-{
-	struct ov9728 *ov9728 = to_ov9728(sd);
-
-	mutex_lock(&ov9728->mutex);
-	ov9728_stop_streaming(ov9728);
-	pm_runtime_put(ov9728->dev);
-	mutex_unlock(&ov9728->mutex);
-
-	return 0;
 }
 
 static int ov9728_set_format(struct v4l2_subdev *sd,
@@ -773,7 +863,7 @@ static int ov9728_init_state(struct v4l2_subdev *sd,
 }
 
 static const struct v4l2_subdev_video_ops ov9728_video_ops = {
-	.s_stream = v4l2_subdev_s_stream_helper,
+	.s_stream = ov9728_set_stream,
 };
 
 static const struct v4l2_subdev_pad_ops ov9728_pad_ops = {
@@ -783,8 +873,6 @@ static const struct v4l2_subdev_pad_ops ov9728_pad_ops = {
 	.enum_frame_size = ov9728_enum_frame_size,
 	.get_selection = ov9728_get_selection,
 	.set_selection = ov9728_set_selection,
-	.enable_streams = ov9728_enable_streams,
-	.disable_streams = ov9728_disable_streams,
 };
 
 static const struct v4l2_subdev_ops ov9728_subdev_ops = {

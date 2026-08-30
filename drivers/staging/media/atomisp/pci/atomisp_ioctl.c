@@ -326,7 +326,9 @@ static int atomisp_s_fmt_cap(struct file *file, void *fh,
 		ret = v4l2_subdev_call_state_active(
 			isp->inputs[asd->input_curr].csi_remote_source,
 			pad, set_frame_interval, &fi);
-		if (!ret) {
+		if (ret == -ENOIOCTLCMD) {
+			ret = 0;
+		} else if (!ret) {
 			asd->frame_interval = fi.interval;
 			asd->frame_interval_valid = true;
 		}
@@ -614,7 +616,7 @@ static int atomisp_enum_fmt_cap(struct file *file, void *fh,
 		if (act_sd_state)
 			v4l2_subdev_unlock_state(act_sd_state);
 
-		if (ret && ret != -ENOIOCTLCMD)
+		if (ret && ret != -ENOIOCTLCMD && ret != -EINVAL)
 			return ret;
 	}
 

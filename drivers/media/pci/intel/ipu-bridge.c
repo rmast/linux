@@ -366,13 +366,14 @@ int ipu_bridge_parse_ssdb(struct acpi_device *adev, struct ipu_sensor *sensor)
 }
 EXPORT_SYMBOL_NS_GPL(ipu_bridge_parse_ssdb, "INTEL_IPU_BRIDGE");
 
-static void ipu_bridge_create_fwnode_properties(
+static int ipu_bridge_create_fwnode_properties(
 	struct ipu_sensor *sensor,
 	struct ipu_bridge *bridge,
 	const struct ipu_sensor_config *cfg)
 {
 	struct ipu_property_names *names = &sensor->prop_names;
 	struct software_node *nodes = sensor->swnodes;
+	u64 *link_freqs;
 
 	sensor->prop_names = prop_names;
 
@@ -440,11 +441,18 @@ static void ipu_bridge_create_fwnode_properties(
 					sensor->prop_names.remote_endpoint,
 					sensor->local_ref);
 
-	if (cfg->nr_link_freqs > 0)
+	if (cfg->nr_link_freqs > 0) {
+		link_freqs = kmemdup(cfg->link_freqs,
+				    sizeof(*link_freqs) * cfg->nr_link_freqs,
+				    GFP_KERNEL);
+		if (!link_freqs)
+			return -ENOMEM;
+
 		sensor->ep_properties[3] = PROPERTY_ENTRY_U64_ARRAY_LEN(
 			sensor->prop_names.link_frequencies,
-			cfg->link_freqs,
+			link_freqs,
 			cfg->nr_link_freqs);
+	}
 
 	sensor->ipu_properties[0] = PROPERTY_ENTRY_U32_ARRAY_LEN(
 					sensor->prop_names.data_lanes,
@@ -452,6 +460,8 @@ static void ipu_bridge_create_fwnode_properties(
 	sensor->ipu_properties[1] = PROPERTY_ENTRY_REF_ARRAY(
 					sensor->prop_names.remote_endpoint,
 					sensor->remote_ref);
+
+	return 0;
 }
 
 static void ipu_bridge_init_swnode_names(struct ipu_sensor *sensor)
@@ -733,7 +743,10 @@ static int ipu_bridge_connect_sensor(const struct ipu_sensor_config *cfg,
 		if (ret)
 			goto err_put_adev;
 
-		ipu_bridge_create_fwnode_properties(sensor, bridge, cfg);
+		ret = ipu_bridge_create_fwnode_properties(sensor, bridge, cfg);
+		if (ret)
+			goto err_put_ivsc;
+
 		ipu_bridge_create_connection_swnodes(bridge, sensor);
 
 		ret = software_node_register_node_group(sensor->group);

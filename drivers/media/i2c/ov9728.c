@@ -736,6 +736,33 @@ static int ov9728_get_selection(struct v4l2_subdev *sd,
 	}
 }
 
+static int ov9728_set_selection(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *sd_state,
+				struct v4l2_subdev_selection *sel)
+{
+	struct v4l2_mbus_framefmt *fmt;
+	struct v4l2_rect *crop;
+
+	if (sel->pad || sel->target != V4L2_SEL_TGT_CROP)
+		return -EINVAL;
+
+	sel->r.left = 0;
+	sel->r.top = 0;
+	sel->r.width = OV9728_NATIVE_WIDTH;
+	sel->r.height = OV9728_NATIVE_HEIGHT;
+
+	if (sel->which == V4L2_SUBDEV_FORMAT_TRY) {
+		crop = v4l2_subdev_state_get_crop(sd_state, sel->pad);
+		*crop = sel->r;
+
+		fmt = v4l2_subdev_state_get_format(sd_state, sel->pad);
+		fmt->width = OV9728_NATIVE_WIDTH;
+		fmt->height = OV9728_NATIVE_HEIGHT;
+	}
+
+	return 0;
+}
+
 static int ov9728_init_state(struct v4l2_subdev *sd,
 			     struct v4l2_subdev_state *state)
 {
@@ -755,6 +782,7 @@ static const struct v4l2_subdev_pad_ops ov9728_pad_ops = {
 	.enum_mbus_code = ov9728_enum_mbus_code,
 	.enum_frame_size = ov9728_enum_frame_size,
 	.get_selection = ov9728_get_selection,
+	.set_selection = ov9728_set_selection,
 	.enable_streams = ov9728_enable_streams,
 	.disable_streams = ov9728_disable_streams,
 };

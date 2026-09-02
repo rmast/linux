@@ -35,12 +35,19 @@
 #define OV9728_REG_MIPI_TIMING21	0x4821
 #define OV9728_REG_MIPI_TIMING23	0x4823
 #define OV9728_REG_MIPI_TIMING37	0x4837
+#define OV9728_REG_OTP_CTRL10		0x3910
+#define OV9728_REG_OTP_CTRL1B		0x391b
+#define OV9728_REG_BLC_CTRL01		0x4001
+#define OV9728_REG_BLC_CTRL09		0x4009
+#define OV9728_REG_BLC_CTRL10		0x4010
+#define OV9728_REG_BLC_CTRL17		0x4017
+#define OV9728_REG_DVP_CTRL00		0x4400
+#define OV9728_REG_DVP_CTRL05		0x4405
 #define OV9728_REG_SYS_CTRL00		0x3001
 #define OV9728_REG_SYS_CTRL01		0x3002
 #define OV9728_REG_SYS_CTRL06		0x3007
 #define OV9728_REG_MIPI_SC_CTRL0	0x3010
 #define OV9728_REG_MIPI_SC_CTRL4	0x3014
-#define OV9728_REG_ISP_CTRL00		0x5000
 
 #define OV9728_REG_MODE_SELECT		0x0100
 #define OV9728_MODE_STANDBY		0x00
@@ -56,30 +63,20 @@
 #define OV9728_REG_HTS			0x380c
 
 /* Exposure controls from sensor */
-#define OV9728_REG_EXPOSURE		0x3500
+#define OV9728_REG_EXPOSURE		0x0202
+#define OV9728_REG_AEC_PK_MANUAL	0x3503
 #define OV9728_EXPOSURE_MIN		4
 #define OV9728_EXPOSURE_MAX_MARGIN	4
 #define OV9728_EXPOSURE_STEP		1
 
 /* Analog gain controls from sensor */
-#define OV9728_REG_ANALOG_GAIN		0x350a
+#define OV9728_REG_ANALOG_GAIN		0x0205
 #define OV9728_ANAL_GAIN_MIN		16
 #define OV9728_ANAL_GAIN_MAX		248
 #define OV9728_ANAL_GAIN_STEP		1
+#define OV9728_ANAL_GAIN_DEFAULT	0x40
 
-/* Digital gain controls from sensor */
-#define OV9728_REG_MWB_R_GAIN		0x5180
-#define OV9728_REG_MWB_G_GAIN		0x5182
-#define OV9728_REG_MWB_B_GAIN		0x5184
-#define OV9728_DGTL_GAIN_MIN		256
-#define OV9728_DGTL_GAIN_MAX		1023
-#define OV9728_DGTL_GAIN_STEP		1
-#define OV9728_DGTL_GAIN_DEFAULT	256
-
-/* Test Pattern Control */
-#define OV9728_REG_TEST_PATTERN		0x5080
-#define OV9728_TEST_PATTERN_ENABLE	BIT(7)
-#define OV9728_TEST_PATTERN_BAR_SHIFT	2
+#define OV9728_EXPOSURE_DEFAULT	0x0200
 
 /* Group Access */
 #define OV9728_REG_GROUP_ACCESS		0x3208
@@ -150,8 +147,60 @@ static const struct ov9728_reg mode_1296x736_regs[] = {
 	 *
 	 * Use the legacy 0x3800-0x382c timing/window registers from the
 	 * original prototype while avoiding the broad ISP/effect block that
-	 * made the sensor stop ACKing I2C at 0x5000.
+	 * made the sensor stop ACKing I2C.
 	 */
+	{0x3600, 0x55},
+	{0x3601, 0x02},
+	{0x3605, 0x22},
+	{0x3611, 0xe7},
+	{0x3654, 0x10},
+	{0x3655, 0x77},
+	{0x3656, 0x77},
+	{0x3657, 0x07},
+	{0x3658, 0x22},
+	{0x3659, 0x22},
+	{0x365a, 0x02},
+	{0x3784, 0x05},
+	{0x3785, 0x55},
+	{0x37c0, 0x07},
+	{0x3503, 0x17},
+	{0x3610, 0x7c},
+	{0x3621, 0x45},
+	{0x3622, 0x9c},
+	{0x3623, 0x04},
+	{0x3624, 0x03},
+	{0x3682, 0x92},
+	{0x3705, 0x36},
+	{0x370d, 0xcc},
+	{0x370f, 0x00},
+	{0x3713, 0x16},
+	{0x3715, 0x13},
+	{0x3d00, 0x00},
+	{0x3d01, 0x00},
+	{0x3d02, 0x00},
+	{0x3d03, 0x00},
+	{0x3d04, 0x00},
+	{0x3d05, 0x00},
+	{0x3d06, 0x00},
+	{0x3d07, 0x00},
+	{0x3d08, 0x00},
+	{0x3d09, 0x00},
+	{0x3d0a, 0x00},
+	{0x3d0b, 0x00},
+	{0x3d0c, 0x00},
+	{0x3d0d, 0x00},
+	{0x3d0e, 0x00},
+	{0x3d0f, 0x00},
+	{0x3d80, 0x00},
+	{0x3d81, 0x00},
+	{0x3d82, 0x38},
+	{0x3d83, 0xa4},
+	{0x3d84, 0x00},
+	{0x3d85, 0x00},
+	{0x3d86, 0x1f},
+	{0x3d87, 0x03},
+	{0x3d8b, 0x00},
+	{0x3d8f, 0x00},
 	{0x3800, 0x00},
 	{0x3801, 0x04},
 	{0x3802, 0x00},
@@ -230,17 +279,45 @@ static const struct ov9728_reg mode_1296x736_regs[] = {
 	{0x4821, 0x50},
 	{0x4823, 0x50},
 	{0x4837, 0x2d},
+	{0x3910, 0xff},
+	{0x3911, 0xff},
+	{0x3912, 0x08},
+	{0x3913, 0x00},
+	{0x3914, 0x00},
+	{0x3915, 0x00},
+	{0x3916, 0x00},
+	{0x3917, 0x00},
+	{0x3918, 0x00},
+	{0x3919, 0x00},
+	{0x391a, 0x00},
+	{0x391b, 0xfc},
+	{0x391c, 0x00},
+	{0x3b00, 0x00},
+	{0x3b02, 0x00},
+	{0x3b03, 0x00},
+	{0x3b04, 0x00},
+	{0x3b05, 0x00},
+	{0x4001, 0x00},
+	{0x4008, 0x02},
+	{0x4009, 0x05},
+	{0x4010, 0x70},
+	{0x4017, 0x0f},
+	{0x4030, 0x00},
+	{0x4031, 0x00},
+	{0x4032, 0x00},
+	{0x4033, 0x00},
+	{0x4034, 0x00},
+	{0x4035, 0x00},
+	{0x4036, 0x00},
+	{0x4037, 0x00},
+	{0x4400, 0x00},
+	{0x4402, 0x00},
+	{0x4403, 0x00},
+	{0x4404, 0x00},
+	{0x4405, 0x00},
 	{0x4814, 0x2b},
 	{0x4307, 0x3a},
 	{0x370a, 0x23},
-};
-
-static const char * const ov9728_test_pattern_menu[] = {
-	"Disabled",
-	"Standard Color Bar",
-	"Top-Bottom Darker Color Bar",
-	"Right-Left Darker Color Bar",
-	"Bottom-Top Darker Color Bar",
 };
 
 static const s64 link_freq_menu_items[] = {
@@ -425,46 +502,6 @@ static int ov9728_write_reg_list(struct ov9728 *ov9728,
 	return 0;
 }
 
-static int ov9728_update_digital_gain(struct ov9728 *ov9728, u32 d_gain)
-{
-	int ret;
-
-	ret = ov9728_write_reg(ov9728, OV9728_REG_GROUP_ACCESS, 1,
-			       OV9728_GROUP_HOLD_START);
-	if (ret)
-		return ret;
-
-	ret = ov9728_write_reg(ov9728, OV9728_REG_MWB_R_GAIN, 2, d_gain);
-	if (ret)
-		return ret;
-
-	ret = ov9728_write_reg(ov9728, OV9728_REG_MWB_G_GAIN, 2, d_gain);
-	if (ret)
-		return ret;
-
-	ret = ov9728_write_reg(ov9728, OV9728_REG_MWB_B_GAIN, 2, d_gain);
-	if (ret)
-		return ret;
-
-	ret = ov9728_write_reg(ov9728, OV9728_REG_GROUP_ACCESS, 1,
-			       OV9728_GROUP_HOLD_END);
-	if (ret)
-		return ret;
-
-	ret = ov9728_write_reg(ov9728, OV9728_REG_GROUP_ACCESS, 1,
-			       OV9728_GROUP_HOLD_LAUNCH);
-	return ret;
-}
-
-static int ov9728_test_pattern(struct ov9728 *ov9728, u32 pattern)
-{
-	if (pattern)
-		pattern = (pattern - 1) << OV9728_TEST_PATTERN_BAR_SHIFT |
-			OV9728_TEST_PATTERN_ENABLE;
-
-	return ov9728_write_reg(ov9728, OV9728_REG_TEST_PATTERN, 1, pattern);
-}
-
 static int ov9728_set_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct ov9728 *ov9728 = container_of(ctrl->handler,
@@ -493,23 +530,14 @@ static int ov9728_set_ctrl(struct v4l2_ctrl *ctrl)
 				       2, ctrl->val);
 		break;
 
-	case V4L2_CID_DIGITAL_GAIN:
-		ret = ov9728_update_digital_gain(ov9728, ctrl->val);
-		break;
-
 	case V4L2_CID_EXPOSURE:
-		/* 4 least significant bits of expsoure are fractional part */
 		ret = ov9728_write_reg(ov9728, OV9728_REG_EXPOSURE,
-				       3, ctrl->val << 4);
+				       2, ctrl->val);
 		break;
 
 	case V4L2_CID_VBLANK:
 		ret = ov9728_write_reg(ov9728, OV9728_REG_VTS, 2,
 				       ov9728->cur_mode->height + ctrl->val);
-		break;
-
-	case V4L2_CID_TEST_PATTERN:
-		ret = ov9728_test_pattern(ov9728, ctrl->val);
 		break;
 
 	default:
@@ -569,20 +597,13 @@ static int ov9728_init_controls(struct ov9728 *ov9728)
 
 	v4l2_ctrl_new_std(ctrl_hdlr, &ov9728_ctrl_ops, V4L2_CID_ANALOGUE_GAIN,
 			  OV9728_ANAL_GAIN_MIN, OV9728_ANAL_GAIN_MAX,
-			  OV9728_ANAL_GAIN_STEP, OV9728_ANAL_GAIN_MIN);
-	v4l2_ctrl_new_std(ctrl_hdlr, &ov9728_ctrl_ops, V4L2_CID_DIGITAL_GAIN,
-			  OV9728_DGTL_GAIN_MIN, OV9728_DGTL_GAIN_MAX,
-			  OV9728_DGTL_GAIN_STEP, OV9728_DGTL_GAIN_DEFAULT);
+			  OV9728_ANAL_GAIN_STEP, OV9728_ANAL_GAIN_DEFAULT);
 	exposure_max = ov9728->cur_mode->vts_def - OV9728_EXPOSURE_MAX_MARGIN;
 	ov9728->exposure = v4l2_ctrl_new_std(ctrl_hdlr, &ov9728_ctrl_ops,
 					     V4L2_CID_EXPOSURE,
 					     OV9728_EXPOSURE_MIN, exposure_max,
 					     OV9728_EXPOSURE_STEP,
-					     exposure_max);
-	v4l2_ctrl_new_std_menu_items(ctrl_hdlr, &ov9728_ctrl_ops,
-				     V4L2_CID_TEST_PATTERN,
-				     ARRAY_SIZE(ov9728_test_pattern_menu) - 1,
-				     0, 0, ov9728_test_pattern_menu);
+					     OV9728_EXPOSURE_DEFAULT);
 	if (ctrl_hdlr->error)
 		return ctrl_hdlr->error;
 
@@ -620,13 +641,22 @@ static void ov9728_log_stream_registers(struct ov9728 *ov9728)
 		{ "mipi_timing21", OV9728_REG_MIPI_TIMING21, 1 },
 		{ "mipi_timing23", OV9728_REG_MIPI_TIMING23, 1 },
 		{ "mipi_timing37", OV9728_REG_MIPI_TIMING37, 1 },
+		{ "otp_ctrl10", OV9728_REG_OTP_CTRL10, 1 },
+		{ "otp_ctrl1b", OV9728_REG_OTP_CTRL1B, 1 },
+		{ "blc_ctrl01", OV9728_REG_BLC_CTRL01, 1 },
+		{ "blc_ctrl09", OV9728_REG_BLC_CTRL09, 1 },
+		{ "blc_ctrl10", OV9728_REG_BLC_CTRL10, 1 },
+		{ "blc_ctrl17", OV9728_REG_BLC_CTRL17, 1 },
+		{ "dvp_ctrl00", OV9728_REG_DVP_CTRL00, 1 },
+		{ "dvp_ctrl05", OV9728_REG_DVP_CTRL05, 1 },
 		{ "sys_ctrl00", OV9728_REG_SYS_CTRL00, 1 },
 		{ "sys_ctrl01", OV9728_REG_SYS_CTRL01, 1 },
 		{ "sys_ctrl06", OV9728_REG_SYS_CTRL06, 1 },
 		{ "mipi_sc_ctrl0", OV9728_REG_MIPI_SC_CTRL0, 1 },
 		{ "mipi_sc_ctrl4", OV9728_REG_MIPI_SC_CTRL4, 1 },
-		{ "isp_ctrl00", OV9728_REG_ISP_CTRL00, 1 },
-		{ "test_pattern", OV9728_REG_TEST_PATTERN, 1 },
+		{ "aec_pk_manual", OV9728_REG_AEC_PK_MANUAL, 1 },
+		{ "exposure", OV9728_REG_EXPOSURE, 2 },
+		{ "analog_gain", OV9728_REG_ANALOG_GAIN, 1 },
 	};
 	unsigned int i;
 	u32 val;
@@ -669,6 +699,20 @@ static int ov9728_start_streaming(struct ov9728 *ov9728)
 	ret = __v4l2_ctrl_handler_setup(ov9728->sd.ctrl_handler);
 	if (ret)
 		return ret;
+
+	ret = ov9728_write_reg(ov9728, OV9728_REG_EXPOSURE, 2,
+				       OV9728_EXPOSURE_DEFAULT);
+	if (ret) {
+		dev_err(ov9728->dev, "failed to set default exposure");
+		return ret;
+	}
+
+	ret = ov9728_write_reg(ov9728, OV9728_REG_ANALOG_GAIN, 1,
+				       OV9728_ANAL_GAIN_DEFAULT);
+	if (ret) {
+		dev_err(ov9728->dev, "failed to set default analog gain");
+		return ret;
+	}
 
 	ret = ov9728_write_reg(ov9728, OV9728_REG_MODE_SELECT,
 			       1, OV9728_MODE_STREAMING);
@@ -1098,6 +1142,18 @@ static int ov9728_probe(struct i2c_client *client)
 		 client->addr);
 
 	ret = ov9728_identify_module(ov9728);
+	if (ret == -EREMOTEIO && ov9728->reset_gpio &&
+	    ov9728->powerdown_gpio) {
+		dev_info(ov9728->dev,
+			 "chip-id read NAKed, retrying after a sensor power cycle\n");
+		ov9728_power_off(ov9728->dev);
+		msleep(100);
+		ret = ov9728_power_on(ov9728->dev);
+		if (!ret) {
+			msleep(100);
+			ret = ov9728_identify_module(ov9728);
+		}
+	}
 	if (ret) {
 		dev_err(ov9728->dev, "failed to find sensor: %d", ret);
 		goto probe_error_pm_put;
